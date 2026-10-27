@@ -66,8 +66,8 @@ func TestMigrateCoreLevels(t *testing.T) {
 	}
 	var v int
 	st.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 1 {
-		t.Errorf("user_version %d, want 1", v)
+	if v != 2 {
+		t.Errorf("user_version %d, want 2", v)
 	}
 }
 
@@ -83,6 +83,7 @@ func TestDNSMeasurement(t *testing.T) {
 		{"DOH//dns.example.net:8443 got answer: graph.facebook.com. -> [] 25ms <context canceled>", "dns_canceled", "DOH//dns.example.net:8443", false, 25, `"domain":"graph.facebook.com"`},
 		{"UDP:77.88.8.8:53 got answer: nosuch.ya.ru. -> [] 12ms <rcode: 3>", "dns", "UDP:77.88.8.8:53", true, 12, `"result":"no record"`},
 		{"UDP:77.88.8.8:53 got answer: ipv6only.ru. -> [] 9µs <record not found>", "dns", "UDP:77.88.8.8:53", true, 0.009, `"result":"no record"`},
+		{"quic+local://dns.example.net got answer: rr8.example.com. -> [] 4.000524634s <app/dns: record not found>", "dns", "quic+local://dns.example.net", false, 4000.524, `"error":"timeout`},
 		{"quic+local://dns.example.net got answer: ads.example.com. -> [0.0.0.0, ::] 7.2ms", "dns", "quic+local://dns.example.net", true, 7.2, `"blocked":true`},
 	}
 	for _, c := range cases {
@@ -107,5 +108,38 @@ func TestDNSMeasurement(t *testing.T) {
 	}
 	if _, ok := dnsMeasurement(logLine{Tag: "v2rayNG", Msg: "UDP:1.1.1.1:53 got answer: a. -> [] 1ms"}); ok {
 		t.Error("parsed a non-core line")
+	}
+}
+
+func TestMigrateDNSTimeouts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	st, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins := `INSERT INTO measurements(device_id, ts, kind, target, ok, ms, data) VALUES('d', 1, 'dns', 'q', 1, ?, ?)`
+	st.Exec(ins, 4000.5, `{"domain":"a","ips":0,"result":"no record"}`)
+	st.Exec(ins, 12.0, `{"domain":"b","ips":0,"result":"no record"}`)
+	st.Exec(`PRAGMA user_version=1`)
+	st.db.Close()
+
+	st, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.db.Close()
+	rows, _ := st.db.Query(`SELECT json_extract(data, '$.domain'), ok, data FROM measurements ORDER BY ms`)
+	defer rows.Close()
+	want := map[string]int{"a": 0, "b": 1}
+	for rows.Next() {
+		var d, data string
+		var ok int
+		rows.Scan(&d, &ok, &data)
+		if ok != want[d] {
+			t.Errorf("%s: ok=%d data=%s", d, ok, data)
+		}
+		if d == "a" && (!strings.Contains(data, "timeout") || strings.Contains(data, "no record")) {
+			t.Errorf("a: data=%s", data)
+		}
 	}
 }

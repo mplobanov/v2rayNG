@@ -389,6 +389,10 @@ func coreLevel(l logLine) string {
 
 // dnsLogRe matches the line xray's "log.dnsLog" writes per upstream DNS query:
 // "<server> got answer: <domain> -> [<ips>] <elapsed> <<error>>" (cache hits say "cache HIT:").
+// dnsTimeoutMs: xray gives each resolver 4 s per query (timeoutMs) and logs a resolver that did
+// not answer in time as "record not found" at that elapsed time, so such a line is a timeout.
+const dnsTimeoutMs = 3900
+
 var dnsLogRe = regexp.MustCompile(`^(\S+) got answer: (\S+) -> \[([^\]]*)\](?: (\S+))?(?: <(.*)>)?$`)
 
 // dnsMeasurement turns a core dnsLog line into a measurement of the resolver that answered:
@@ -420,6 +424,8 @@ func dnsMeasurement(l logLine) (measIn, bool) {
 		out.Ok = true
 	case strings.Contains(errText, "context canceled"):
 		out.Kind = "dns_canceled"
+	case (strings.Contains(errText, "record not found") || strings.Contains(errText, "empty response")) && out.Ms >= dnsTimeoutMs:
+		data["error"] = "timeout: no answer within the resolver's 4 s"
 	case strings.Contains(errText, "record not found") || strings.Contains(errText, "empty response") ||
 		strings.Contains(errText, "rcode: 3"):
 		out.Ok = true

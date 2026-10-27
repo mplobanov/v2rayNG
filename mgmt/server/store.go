@@ -175,6 +175,22 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	if v < 2 {
+		// 2: resolver timeouts stored as answers ("record not found" at xray's 4 s limit).
+		err := s.Write(func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE measurements SET ok=0,
+				data=json_set(json_remove(data, '$.result'), '$.error', 'timeout: no answer within the resolver''s 4 s')
+				WHERE kind='dns' AND ok=1 AND ms>=? AND json_extract(data, '$.result')='no record'`, dnsTimeoutMs)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(`PRAGMA user_version=2`)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
