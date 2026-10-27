@@ -23,6 +23,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.handler.mgmt.MgmtSyncWorker
+import com.v2ray.ang.handler.mgmt.MgmtTelemetry
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
@@ -230,6 +231,7 @@ class MainRepository(
     override fun syncSubscriptions() {
         SubscriptionUpdater.sync(app)
         // Remote management: keep the idle sync scheduled and check in whenever the app opens.
+        MgmtTelemetry.rememberWifiName(app)
         MgmtSyncWorker.schedule(app)
         MgmtSyncWorker.enqueueNow(app, force = false)
     }

@@ -132,6 +132,24 @@ or a list of remarks.
 Each measurement carries `net` = `<transport>/<ISP AS name>` derived from the device state and its
 public IP, so results can be compared per access network (`cellular/MTS-AS` vs `wifi/MGTS`).
 
+## State document (selected fields)
+
+`GET .../state` returns the merged snapshot: `vpn` (running, mode, hev_tun, loglevel,
+core_uptime_s, selected server, traffic_bytes), `network.default` (transports, validated, metered,
+bandwidth, dns, private DNS, `wifi` {ssid, ssid_source, rssi_dbm, freq_mhz, link/tx/rx_mbps,
+standard} or `cell` {operator, mccmnc, data_network_type, signal_dbm, signal_level}),
+`network.cellular_standby` (the mobile network while on Wi-Fi, incl. data_enabled), `power`,
+`mgmt`, `ip`, `ip_info`, `net_label`, and the heavy sections `settings`, `routing`,
+`subscriptions`, `servers`. Android reveals the Wi-Fi name only while the app is open;
+`ssid_source: "cached"` marks the name recorded then for the same network.
+
+## Log levels
+
+Logcat priority is kept, except for core lines (`tag=GoLog`, which libv2ray always writes as I):
+they take xray's own `[Error]`/`[Warning]`/`[Debug]` level. Routine core noise is demoted: DNS
+`context canceled` (the losing half of a parallel DoQ+DoH lookup) → D, the start banner and
+deprecation notices → I. Access lines (`accepted … [tun >> proxy]`) stay I.
+
 ## Admin endpoints (Bearer admin token)
 
 | method & path | purpose |

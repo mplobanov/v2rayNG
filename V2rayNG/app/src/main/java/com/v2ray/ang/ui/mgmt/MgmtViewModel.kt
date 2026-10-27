@@ -1,11 +1,15 @@
 package com.v2ray.ang.ui.mgmt
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.mgmt.MgmtSettings
 import com.v2ray.ang.handler.mgmt.MgmtSyncWorker
+import com.v2ray.ang.handler.mgmt.MgmtTelemetry
 import com.v2ray.ang.ui.base.BaseViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -25,6 +29,14 @@ data class MgmtUiState(
     val lastSyncMs: Long = 0L,
     val lastError: String = "",
     val appliedVersion: String = "",
+    val diagnosticsAllowed: Boolean = false,
+)
+
+/** Location reveals the Wi-Fi name, phone state the mobile network type. */
+val diagnosticsPermissions = arrayOf(
+    Manifest.permission.ACCESS_FINE_LOCATION,
+    Manifest.permission.ACCESS_COARSE_LOCATION,
+    Manifest.permission.READ_PHONE_STATE,
 )
 
 class MgmtViewModel(application: Application) : BaseViewModel(application) {
@@ -55,6 +67,9 @@ class MgmtViewModel(application: Application) : BaseViewModel(application) {
                 lastSyncMs = MgmtSettings.lastSync(),
                 lastError = MgmtSettings.lastError(),
                 appliedVersion = MgmtSettings.appliedVersion(),
+                diagnosticsAllowed = diagnosticsPermissions.all {
+                    ContextCompat.checkSelfPermission(app, it) == PackageManager.PERMISSION_GRANTED
+                },
             )
         }
     }
@@ -85,6 +100,7 @@ class MgmtViewModel(application: Application) : BaseViewModel(application) {
 
     fun syncNow() {
         viewModelScope.launch(Dispatchers.IO) {
+            MgmtTelemetry.rememberWifiName(app)
             MgmtSyncWorker.enqueueNow(app)
         }
         toast(R.string.mgmt_sync_started)

@@ -1,6 +1,5 @@
 package com.v2ray.ang.ui.mgmt
 
-import android.Manifest
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -36,13 +35,8 @@ class MgmtActivity : BaseComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { viewModel.syncNow() }
 
     private fun requestDiagnosticsPermissions() {
-        val perms = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE,
-        )
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        permissionLauncher.launch(perms.toTypedArray())
+        permissionLauncher.launch(diagnosticsPermissions)
     }
 
     @Composable
@@ -91,7 +85,9 @@ class MgmtActivity : BaseComponentActivity() {
                 )
                 SettingsMenuItem(
                     title = stringResource(R.string.mgmt_grant_permissions),
-                    subtitle = stringResource(R.string.mgmt_grant_permissions_summary),
+                    subtitle = stringResource(
+                        if (state.diagnosticsAllowed) R.string.mgmt_grant_permissions_granted else R.string.mgmt_grant_permissions_summary
+                    ),
                     onClick = ::requestDiagnosticsPermissions
                 )
 

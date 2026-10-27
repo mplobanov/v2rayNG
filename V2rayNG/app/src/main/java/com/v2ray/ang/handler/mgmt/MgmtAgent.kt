@@ -43,6 +43,7 @@ object MgmtAgent {
     private var shipper: MgmtLogShipper? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var netFollowUp: Job? = null
+    private var loops: List<Job> = emptyList()
     private val measurements = ConcurrentLinkedQueue<JsonObject>()
     private val results = ConcurrentLinkedQueue<JsonObject>()
     private var wake = Channel<Boolean>(Channel.CONFLATED)
@@ -77,10 +78,12 @@ object MgmtAgent {
             MmkvManager.encodeSettings(MgmtSettings.KEY_CORE_VERSION, CoreNativeManager.getLibVersion())
         }
         s.launch { sh.stream(MgmtSettings.agentString("log_spec", "*:W GoLog:V {app}:V")) }
-        s.launch { syncLoop(ctx) }
-        s.launch { commandLoop(ctx) }
-        s.launch { logLoop() }
-        s.launch { probeLoop() }
+        loops = listOf(
+            s.launch { syncLoop(ctx) },
+            s.launch { commandLoop(ctx) },
+            s.launch { logLoop() },
+            s.launch { probeLoop() },
+        )
         registerNetworkCallback(ctx)
         LogUtil.i(AppConfig.TAG, "Mgmt: agent started")
     }
@@ -94,6 +97,10 @@ object MgmtAgent {
         val sh = shipper
         shipper = null
         unregisterNetworkCallback(ctx)
+        // Stop the loops first: one finishing an in-flight sync or long poll must not mark the
+        // agent alive again, which would keep the idle worker away for the whole alive window.
+        loops.forEach { it.cancel() }
+        loops = emptyList()
         MgmtSettings.markAgentAlive(false)
         core = null
         s.launch {
@@ -106,6 +113,7 @@ object MgmtAgent {
                 }
             }
             sh?.stop()
+            MgmtSettings.markAgentAlive(false)
             s.cancel()
         }
         LogUtil.i(AppConfig.TAG, "Mgmt: agent stopping")
@@ -137,6 +145,7 @@ object MgmtAgent {
             val ms = drainAll(measurements)
             val rs = drainAll(results)
             val out = MgmtClient.sync(ctx, facts(), evs, ms, rs, full)
+            if (!isActive) break
             MgmtSettings.markAgentAlive(true)
             if (!out.ok) {
                 MgmtEvents.requeue(evs)
@@ -173,6 +182,7 @@ object MgmtAgent {
             if (remaining <= 0) return false
             val wait = minOf(MgmtSettings.agentInt("poll_wait_sec", 240).toLong(), remaining / 1000).coerceAtLeast(5)
             val r = MgmtClient.poll(wait.toInt())
+            if (!isActive) break
             MgmtSettings.markAgentAlive(true)
             if (r == null || !r.ok || r.body == null) {
                 val wakeReq = withTimeoutOrNull(minOf(30_000L, remaining.coerceAtLeast(1000))) { wake.receive() }

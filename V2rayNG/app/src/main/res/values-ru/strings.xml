@@ -586,6 +586,7 @@
     <string name="mgmt_sync_started">Синхронизация запущена</string>
     <string name="mgmt_grant_permissions">Разрешить диагностику сети</string>
     <string name="mgmt_grant_permissions_summary">Чтобы в отчётах было имя Wi-Fi и тип мобильной сети (разрешения на геолокацию и телефон)</string>
+    <string name="mgmt_grant_permissions_granted">Разрешено: в отчётах есть имя Wi-Fi (запоминается при открытии приложения) и мобильная сеть</string>
     <string name="mgmt_section_device">Это устройство</string>
     <string name="mgmt_section_server">Сервер</string>
     <string name="mgmt_device_name">Имя устройства</string>

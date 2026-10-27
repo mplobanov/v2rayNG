@@ -72,7 +72,7 @@ object MgmtConfigApplier {
         if (r.needsRestart && restartMode != "never") {
             // Only reaches a running daemon; a stopped VPN picks the new settings up when started.
             LauncherManager.restartService(context)
-            r.restarted = true
+            r.restarted = MgmtSettings.isAgentAlive()
         }
         LogUtil.i(AppConfig.TAG, "Mgmt: applied config $version changed=${r.changed} errors=${r.errors.size}")
         return r

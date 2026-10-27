@@ -3,6 +3,7 @@ package com.v2ray.ang.handler.mgmt
 import android.app.ActivityManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
@@ -24,6 +25,7 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.JsonUtil
+import com.v2ray.ang.util.LogUtil
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.TimeZone
@@ -138,7 +140,7 @@ object MgmtTelemetry {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 out.addProperty("signal_strength", caps.signalStrength)
             }
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) out.add("wifi", wifiSection(context, caps))
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) out.add("wifi", wifiSection(context, network, caps))
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) out.add("cell", cellSection(context))
         }
         val lp: LinkProperties? = try { cm.getLinkProperties(network) } catch (_: Exception) { null }
@@ -157,7 +159,7 @@ object MgmtTelemetry {
         return out
     }
 
-    private fun wifiSection(context: Context, caps: NetworkCapabilities): JsonObject {
+    private fun wifiSection(context: Context, network: Network, caps: NetworkCapabilities): JsonObject {
         val out = JsonObject()
         val info: WifiInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             caps.transportInfo as? WifiInfo ?: legacyWifiInfo(context)
@@ -165,7 +167,15 @@ object MgmtTelemetry {
             legacyWifiInfo(context)
         }
         info ?: return out
-        out.addProperty("ssid", info.ssid?.trim('"'))
+        val name = wifiName(context, info)
+        if (name != null) {
+            MmkvManager.encodeSettings(MgmtSettings.KEY_WIFI_NAME, "$network\t$name")
+            out.addProperty("ssid", name)
+        } else {
+            val cached = cachedWifiName(MmkvManager.decodeSettingsString(MgmtSettings.KEY_WIFI_NAME), network.toString())
+            out.addProperty("ssid", cached ?: UNKNOWN_SSID)
+            if (cached != null) out.addProperty("ssid_source", "cached")
+        }
         out.addProperty("rssi_dbm", info.rssi)
         out.addProperty("link_mbps", info.linkSpeed)
         out.addProperty("freq_mhz", info.frequency)
@@ -175,6 +185,38 @@ object MgmtTelemetry {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) out.addProperty("standard", info.wifiStandard)
         return out
+    }
+
+    private const val UNKNOWN_SSID = "<unknown ssid>"
+
+    /**
+     * The Wi-Fi name, or null while Android hides it. Capabilities returned by
+     * getNetworkCapabilities() never carry it, and WifiManager only reveals it while the app may
+     * access location: with the "while using the app" grant, only while the app is open, never to
+     * the VPN daemon in the background. [wifiSection] therefore keeps the last name seen for the
+     * current network, and [rememberWifiName] records it whenever the app is opened.
+     */
+    private fun wifiName(context: Context, fromCaps: WifiInfo?): String? =
+        sequenceOf({ fromCaps?.ssid }, { legacyWifiInfo(context)?.ssid })
+            .map { it()?.trim('"') }
+            .firstOrNull { !it.isNullOrBlank() && it != UNKNOWN_SSID }
+
+    /** The remembered name if [cache] ("<network id>\t<name>") belongs to [networkId]. */
+    internal fun cachedWifiName(cache: String?, networkId: String): String? {
+        val parts = cache.orEmpty().split('\t', limit = 2)
+        return parts.getOrNull(1)?.takeIf { parts[0] == networkId && it.isNotEmpty() }
+    }
+
+    /** Called from the UI process when the app is opened, while Android reveals the Wi-Fi name. */
+    fun rememberWifiName(context: Context) {
+        try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return
+            val caps = cm.getNetworkCapabilities(network) ?: return
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) wifiSection(context, network, caps)
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "Mgmt: reading the Wi-Fi name failed", e)
+        }
     }
 
     /**
@@ -198,6 +240,7 @@ object MgmtTelemetry {
             out.addProperty("sim_operator", tm.simOperatorName)
             out.addProperty("country", tm.networkCountryIso)
             out.addProperty("roaming", tm.isNetworkRoaming)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) out.addProperty("data_enabled", tm.isDataEnabled)
         } catch (_: Exception) {
         }
         try {
@@ -309,7 +352,15 @@ object MgmtTelemetry {
         val st = JsonObject()
         st.addProperty("ts", System.currentTimeMillis() / 1000.0)
         st.add("vpn", vpnSection(core))
-        st.add("network", JsonObject().apply { add("default", networkSummary(context, cm, cm.activeNetwork)) })
+        st.add("network", JsonObject().apply {
+            val default = networkSummary(context, cm, cm.activeNetwork)
+            add("default", default)
+            // The mobile network the phone falls back to when Wi-Fi drops.
+            val onCellular = default.getAsJsonArray("transports")?.any { it.asString == "cellular" } == true
+            if (!onCellular && context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
+                add("cellular_standby", cellSection(context))
+            }
+        })
         st.add("power", powerSection(context))
         st.add("mgmt", JsonObject().apply {
             addProperty("applied_version", MgmtSettings.appliedVersion())

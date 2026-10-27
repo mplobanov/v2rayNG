@@ -52,13 +52,22 @@ class MgmtSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             lines.chunked(5000).forEach { if (!MgmtLogShipper.upload(it, 0, "idle")) return@forEach }
         }
         schedule(ctx)
+        val pendingChecks = inputData.getInt(KEY_PENDING_CHECKS, 0)
+        if (MgmtSettings.status() == "pending" && pendingChecks > 0) {
+            enqueuePendingCheck(ctx, pendingChecks - 1)
+        }
         return Result.success()
     }
 
     companion object {
         private const val PERIODIC = "mgmt_sync"
         private const val NOW = "mgmt_sync_now"
+        private const val PENDING = "mgmt_sync_pending"
         private const val KEY_FORCE = "force"
+        private const val KEY_PENDING_CHECKS = "pending_checks"
+
+        /** A device waiting for approval checks back once a minute for this many minutes after enqueueNow. */
+        private const val PENDING_CHECKS = 30
         private const val KEY_SCHEDULED_MIN = "mgmt_scheduled_interval"
 
         private val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
@@ -84,9 +93,22 @@ class MgmtSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (!MgmtSettings.isEnabled()) return
             val request = OneTimeWorkRequestBuilder<MgmtSyncWorker>()
                 .setConstraints(constraints)
-                .setInputData(workDataOf(KEY_FORCE to force))
+                .setInputData(workDataOf(KEY_FORCE to force, KEY_PENDING_CHECKS to PENDING_CHECKS))
                 .build()
             RemoteWorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
+        }
+
+        /**
+         * Lets an approval reach a device whose VPN is off without the family member reopening the
+         * app: the periodic idle sync alone would leave it waiting up to [schedule]'s interval.
+         */
+        private fun enqueuePendingCheck(context: Context, checksLeft: Int) {
+            val request = OneTimeWorkRequestBuilder<MgmtSyncWorker>()
+                .setConstraints(constraints)
+                .setInitialDelay(1, TimeUnit.MINUTES)
+                .setInputData(workDataOf(KEY_FORCE to false, KEY_PENDING_CHECKS to checksLeft))
+                .build()
+            RemoteWorkManager.getInstance(context).enqueueUniqueWork(PENDING, ExistingWorkPolicy.REPLACE, request)
         }
     }
 }

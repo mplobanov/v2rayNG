@@ -125,7 +125,57 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return s, nil
+}
+
+// migrate applies one-off data migrations, tracked in PRAGMA user_version.
+func (s *Store) migrate() error {
+	var v int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v < 1 {
+		// 1: core lines stored before coreLevel existed carry logcat's I; give them xray's level.
+		err := s.Write(func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT id, lvl, msg FROM logs WHERE tag='GoLog' AND msg LIKE '[%'`)
+			if err != nil {
+				return err
+			}
+			fix := map[int64]string{}
+			for rows.Next() {
+				var id int64
+				var l logLine
+				if err := rows.Scan(&id, &l.Lvl, &l.Msg); err != nil {
+					rows.Close()
+					return err
+				}
+				l.Tag = "GoLog"
+				if lvl := coreLevel(l); lvl != l.Lvl {
+					fix[id] = lvl
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			for id, lvl := range fix {
+				if _, err := tx.Exec(`UPDATE logs SET lvl=? WHERE id=?`, lvl, id); err != nil {
+					return err
+				}
+			}
+			_, err = tx.Exec(`PRAGMA user_version=1`)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Write runs fn in a transaction while holding the process-wide writer lock.

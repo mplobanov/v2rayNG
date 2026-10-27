@@ -583,6 +583,7 @@
     <string name="mgmt_sync_started">Sync requested</string>
     <string name="mgmt_grant_permissions">Allow network diagnostics</string>
     <string name="mgmt_grant_permissions_summary">Lets reports include the Wi-Fi name and mobile network type (location and phone permissions)</string>
+    <string name="mgmt_grant_permissions_granted">Allowed: reports include the Wi-Fi name (recorded when the app is opened) and the mobile network</string>
     <string name="mgmt_section_device">This device</string>
     <string name="mgmt_section_server">Server</string>
     <string name="mgmt_device_name">Device name</string>

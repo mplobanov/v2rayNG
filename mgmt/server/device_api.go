@@ -361,6 +361,32 @@ type logLine struct {
 	Msg string  `json:"msg"`
 }
 
+// coreLevel returns the level of a log line, taking it from xray's own "[Error] …" prefix for
+// core (GoLog) lines: libv2ray writes everything to logcat as I, which would hide core errors
+// from level filters and the timeline. Routine noise is demoted: the cancelled loser of a
+// parallel DoQ+DoH lookup, and the start banner and deprecation notice every core (including the
+// temporary ones real_ping starts) prints.
+func coreLevel(l logLine) string {
+	if l.Tag != "GoLog" {
+		return l.Lvl
+	}
+	switch {
+	case strings.HasPrefix(l.Msg, "[Error]"):
+		if strings.Contains(l.Msg, " app/dns: ") && strings.HasSuffix(strings.TrimSpace(l.Msg), "context canceled") {
+			return "D"
+		}
+		return "E"
+	case strings.HasPrefix(l.Msg, "[Warning]"):
+		if strings.HasPrefix(l.Msg, "[Warning] core: Xray ") || strings.Contains(l.Msg, " is deprecated") {
+			return "I"
+		}
+		return "W"
+	case strings.HasPrefix(l.Msg, "[Debug]"):
+		return "D"
+	}
+	return l.Lvl
+}
+
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 	var req struct {
 		Lines   []logLine `json:"lines"`
@@ -384,7 +410,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 			if len(l.Msg) > 16000 {
 				l.Msg = l.Msg[:16000] + "…"
 			}
-			if _, err := stmt.Exec(d.ID, ts, l.Pid, l.Lvl, l.Tag, l.Msg); err != nil {
+			if _, err := stmt.Exec(d.ID, ts, l.Pid, coreLevel(l), l.Tag, l.Msg); err != nil {
 				return err
 			}
 			if ts > maxTs {

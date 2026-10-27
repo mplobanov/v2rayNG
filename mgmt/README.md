@@ -60,10 +60,18 @@ updated in place. The server keeps only SHA-256 hashes of the tokens.
    ngctl approve <id-prefix> --name mama --profile family
    ngctl overrides mama put '{"subscriptions":{"items":[{"id":"mama","remarks":"VPN","url":"https://<panel>:2096/sub/<subId>"}]},"select":{"remarks":"Bomboclat"}}'
    ```
-4. The phone picks it up at its next sync (immediately if the app is opened, otherwise ≤ 15 min),
-   downloads the subscription and selects the server. Tap the button once to grant the VPN
-   permission; "start on boot" is on in the `family` profile. For a fully hands-off setup turn on
-   Android's *Always-on VPN* for the app.
+4. The phone picks it up within about a minute: a pending phone checks back every minute for
+   30 minutes after the app was opened (and every minute while its VPN runs); later it waits for
+   the next idle sync (≤ 15 min). It downloads the subscription and selects the server. Tap the
+   button once to grant the VPN permission (Android 17 also asks for "nearby devices": Allow);
+   "start on boot" is on in the `family` profile. For a fully hands-off setup turn on Android's
+   *Always-on VPN* for the app.
+5. Optional: *Remote management → Allow network diagnostics* (location "while using the app" +
+   phone). Android shows the Wi-Fi name only while the app is open, so reports carry the name
+   recorded at the last app open for the same network (`"ssid_source": "cached"`).
+
+Updating: install the new APK over the old one (same release key). Start-on-boot also fires on an
+app update, so the VPN restarts by itself within seconds.
 
 ## Debugging recipes
 
@@ -78,6 +86,10 @@ ngctl logs mama --since 15m --tag GoLog -f      # follow the core log
 ngctl cmd mama exec '{"argv":["ping","-c","5","77.88.8.8"]}' --wait 60
 ngctl profile patch family '{"settings":{"pref_mux_enabled":true}}'   # everyone, at next sync
 ```
+
+Core (xray) lines carry xray's own level (`[Error]` → E, `[Warning]` → W), so `--level W` and the
+timeline show core errors; the cancelled loser of a parallel DoQ+DoH lookup and the per-core start
+banner are stored as D/I.
 
 `tcp_connect` / `tls_handshake` failing while `http_direct` to ya.ru works means the path to that
 server port is blocked (DPI); `core_delay` failing while the direct probes pass points at the server
