@@ -1,10 +1,12 @@
 package com.v2ray.ang.handler.mgmt
 
 import android.os.Build
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.handler.MmkvManager
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * Persistent state of the remote-management client (logs & configs server, see mgmt/server).
@@ -37,11 +39,77 @@ object MgmtSettings {
     const val KEY_CORE_STARTED = "mgmt_core_started"
     const val KEY_WIFI_NAME = "mgmt_wifi_name"
     const val KEY_STARTED_COMMANDS = "mgmt_started_commands"
+    const val KEY_URL_FAILURES = "mgmt_url_failures"
+    const val KEY_URL_OK = "mgmt_url_ok"
+
+    /** How long an address that could not be reached is tried only after the others. */
+    private const val URL_FAILED_HOLD_MS = 10 * 60_000L
 
     fun isEnabled(): Boolean =
         MmkvManager.decodeSettingsBool(KEY_ENABLED, BuildConfig.MGMT_URL.isNotBlank()) && url().isNotBlank()
 
     fun url(): String = (MmkvManager.decodeSettingsString(KEY_URL).orEmpty().ifBlank { BuildConfig.MGMT_URL }).trimEnd('/')
+
+    /**
+     * Server addresses in order of preference. A URL set by hand on the management screen names
+     * one specific server and is used alone; otherwise the server's own list (agent parameter
+     * "mgmt_urls", from the server's device_urls) comes first and the address baked into the
+     * build is the last resort. All of them share the pinned key.
+     */
+    fun urls(): List<String> =
+        candidateUrls(MmkvManager.decodeSettingsString(KEY_URL), agentParams().get("mgmt_urls"), BuildConfig.MGMT_URL)
+
+    /** [urls] with the ones that could not be reached lately moved behind the others. */
+    fun urlsToTry(): List<String> =
+        orderedByFailures(urls(), MmkvManager.decodeSettingsString(KEY_URL_FAILURES), System.currentTimeMillis())
+
+    /** Records whether a request to [url] got a connection to the server. */
+    fun recordUrl(url: String, reached: Boolean) {
+        val raw = MmkvManager.decodeSettingsString(KEY_URL_FAILURES).orEmpty()
+        val next = failuresWith(raw, url, reached, System.currentTimeMillis())
+        if (next != raw) MmkvManager.encodeSettings(KEY_URL_FAILURES, next)
+        if (reached && lastUrl() != url) MmkvManager.encodeSettings(KEY_URL_OK, url)
+    }
+
+    /** The address the last successful request went to. */
+    fun lastUrl(): String = MmkvManager.decodeSettingsString(KEY_URL_OK).orEmpty()
+
+    internal fun candidateUrls(manual: String?, pushed: JsonElement?, baked: String): List<String> {
+        fun norm(u: String?, httpsOnly: Boolean): String? {
+            val s = u?.trim()?.trimEnd('/') ?: return null
+            val parsed = s.toHttpUrlOrNull() ?: return null
+            return s.takeIf { !httpsOnly || parsed.isHttps }
+        }
+        norm(manual, httpsOnly = false)?.let { return listOf(it) }
+        // Plain HTTP would send the device token in clear, so the server's list must be HTTPS.
+        val fromServer = when {
+            pushed == null || pushed.isJsonNull -> emptyList()
+            pushed.isJsonArray -> pushed.asJsonArray.mapNotNull { e -> e.takeIf { it.isJsonPrimitive }?.asString }
+            pushed.isJsonPrimitive -> pushed.asString.split(' ', ',', '\n')
+            else -> emptyList()
+        }.mapNotNull { norm(it, httpsOnly = true) }
+        return (fromServer + listOfNotNull(norm(baked, httpsOnly = false))).distinct()
+    }
+
+    internal fun orderedByFailures(urls: List<String>, failuresRaw: String?, nowMs: Long): List<String> {
+        val failed = parseFailures(failuresRaw).filterValues { nowMs - it < URL_FAILED_HOLD_MS }
+        val (held, fresh) = urls.partition { it in failed }
+        return fresh + held.sortedBy { failed[it] }
+    }
+
+    internal fun failuresWith(raw: String?, url: String, reached: Boolean, nowMs: Long): String {
+        val m = parseFailures(raw).filterValues { nowMs - it < URL_FAILED_HOLD_MS }.toMutableMap()
+        if (reached) m.remove(url) else m[url] = nowMs
+        if (m.isEmpty()) return ""
+        return JsonObject().apply { m.forEach { (k, v) -> addProperty(k, v) } }.toString()
+    }
+
+    private fun parseFailures(raw: String?): Map<String, Long> = try {
+        if (raw.isNullOrBlank()) emptyMap()
+        else JsonParser.parseString(raw).asJsonObject.entrySet().associate { it.key to it.value.asLong }
+    } catch (_: Exception) {
+        emptyMap()
+    }
 
     fun pin(): String = MmkvManager.decodeSettingsString(KEY_PIN).orEmpty().ifBlank { BuildConfig.MGMT_PIN }
 

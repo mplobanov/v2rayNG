@@ -365,14 +365,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, d *Device) {
 		d.Name = name
 		resp = map[string]any{"status": d.Status, "server_time": nowT.Unix(), "device_id": d.ID, "name": name}
 		if d.Status != "approved" {
-			resp["agent"] = agentParams(nil, d)
+			resp["agent"] = s.agentParams(nil, d)
 			return nil
 		}
 		eff, err := s.effectiveConfig(tx, d)
 		if err != nil {
 			return err
 		}
-		resp["agent"] = agentParams(eff.Telemetry, d)
+		resp["agent"] = s.agentParams(eff.Telemetry, d)
 		resp["config_version"] = eff.Version
 		if applied != eff.Version {
 			resp["config"] = map[string]any{"version": eff.Version, "doc": eff.Doc}
@@ -605,7 +605,7 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 			changed := applied != "" && applied != eff.Version
 			if len(cmds) > 0 || changed {
 				resp = map[string]any{"status": cur.Status, "commands": cmds, "config_changed": changed,
-					"agent": agentParams(eff.Telemetry, cur)}
+					"agent": s.agentParams(eff.Telemetry, cur)}
 				return nil
 			}
 			if acks {

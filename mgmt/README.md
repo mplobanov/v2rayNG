@@ -8,7 +8,7 @@ This fork (`com.v2ray.ang.family`) adds two things to v2rayNG:
    an agent) drives it with the `ngctl` CLI.
 
 ```
- phone (v2rayNG Family)                                server <ip>:9443 (ngmgmt, SQLite)
+ phone (v2rayNG Family)                                server <name>:9443 (ngmgmt, SQLite)
  ├─ VPN daemon process ── MgmtAgent ── sync / long-poll ──▶  /v1/sync  /v1/poll  /v1/logs  /v1/results
  │    logcat stream (xray GoLog + app), probes, net events      │
  └─ WorkManager (:bg) ─── MgmtSyncWorker, every 15 min ─────▶   │ profiles + per-device overrides
@@ -18,8 +18,30 @@ This fork (`com.v2ray.ang.family`) adds two things to v2rayNG:
 
 The app's own traffic is excluded from its VPN, so the phone reaches the server over its physical
 network even when the tunnel is broken; that is also why "direct" probes measure the ISP path.
-The channel is HTTPS to a bare IP with a 30-year self-signed certificate whose SPKI hash is pinned in
-the app and in `ngctl` (no DNS, no CA, no renewals).
+The channel is HTTPS with a 30-year self-signed certificate whose SPKI hash is pinned in the app
+and in `ngctl`. Neither checks the host name, so the same key answers under any DNS name or IP (no
+CA, no renewals).
+
+### Server addresses
+
+The APK bakes in one URL, normally a DNS name, so the server can move to a new IP by editing the A
+record (phones re-resolve within the record's TTL). On top of that the server tells every app its
+full address list: `device_urls` in `/etc/ngmgmt/config.json`, sent as agent parameter `mgmt_urls`
+(a profile's `telemetry` section may override it). The app tries the list in order, then the
+baked URL:
+
+- It moves on to the next address only when no connection was made (DNS failure, refused or timed
+  out connect, pin mismatch). Such a request never reached the server, so sending it again is safe.
+- An address that failed is tried after the others for 10 minutes.
+- A URL typed by hand on the *Remote management* screen is used alone.
+
+So a new name, or the bare IP as a fallback for a phone whose DNS is broken, reaches the phones
+without a new APK, as long as the list is published while the old address still works. Set
+`NGMGMT_DEVICE_URLS` (space-separated, best first) in `deploy.env`; `deploy.sh` writes it to the
+server config on every deploy. `ngctl devices` shows each phone's `mgmt_url`, the address its last
+successful request used (apps from 2.3.13-family.5, device info `"mgmt_caps"` includes `"urls"`).
+Moving to another server means copying `/etc/ngmgmt/` (keep `tls.key`, or every pin breaks) and
+the database.
 
 ## Files
 
@@ -34,7 +56,8 @@ the app and in `ngctl` (no DNS, no CA, no renewals).
 | `V2rayNG/app/src/main/java/com/v2ray/ang/ui/mgmt/` | "Remote management" screen (drawer) |
 
 Secrets and infrastructure details live only on the admin Mac in `~/.config/ngctl/` (mode 700):
-`config.json` (server URL, admin token, pin), `enroll_token`, `pin`, `deploy.env` (SSH target),
+`config.json` (server URL, admin token, pin), `enroll_token`, `pin`, `deploy.env` (SSH target,
+name, device address list),
 `profiles/` (live profiles), the release key `v2rayng-family.jks` and its
 `signing.properties`. **Back up the release key**: without it the family's installed apps cannot be
 updated in place. The server keeps only SHA-256 hashes of the tokens.
@@ -47,7 +70,7 @@ updated in place. The server keeps only SHA-256 hashes of the tokens.
 - Daily backup `ngmgmt-backup.timer` 01:45 → `/var/backups/ngmgmt/` (7 kept).
 - Retention: logs 14 days / 3M rows, states 30 days, events and measurements 120 days.
 - Upgrade: `mgmt/deploy/deploy.sh` (no flags). First install was `deploy.sh --init`.
-- Logs: `journalctl -u ngmgmt`. Health: `curl -k https://<server-ip>:9443/healthz`.
+- Logs: `journalctl -u ngmgmt`. Health: `curl -k https://<server-name>:9443/healthz`.
 
 ## Adding a family member
 

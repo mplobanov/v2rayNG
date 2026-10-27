@@ -24,8 +24,8 @@ android {
         applicationId = "com.v2ray.ang.family"
         minSdk = 24
         targetSdk = 37
-        versionCode = 756
-        versionName = "2.3.13-family.4"
+        versionCode = 757
+        versionName = "2.3.13-family.5"
         buildConfigField("String", "MGMT_URL", "\"${mgmtProp("url")}\"")
         buildConfigField("String", "MGMT_PIN", "\"${mgmtProp("pin")}\"")
         buildConfigField("String", "MGMT_ENROLL_TOKEN", "\"${mgmtProp("enroll_token")}\"")

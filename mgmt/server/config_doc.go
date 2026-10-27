@@ -170,7 +170,7 @@ func (s *Server) effectiveConfig(q queryer, d *Device) (*Effective, error) {
 }
 
 // agentParams is what the device agent runs with until the next sync.
-func agentParams(tel map[string]any, d *Device) map[string]any {
+func (s *Server) agentParams(tel map[string]any, d *Device) map[string]any {
 	a := map[string]any{
 		"sync_sec":          300,
 		"idle_sync_min":     15,
@@ -186,6 +186,9 @@ func agentParams(tel map[string]any, d *Device) map[string]any {
 		"live_until":        0,
 		"poll_wait_sec":     240,
 		"upload_state_full": false,
+	}
+	if len(s.cfg.DeviceURLs) > 0 {
+		a["mgmt_urls"] = s.cfg.DeviceURLs
 	}
 	for k, v := range tel {
 		a[k] = v

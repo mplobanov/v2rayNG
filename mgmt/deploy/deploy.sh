@@ -8,12 +8,17 @@
 # ~/.config/ngctl/ (config.json for ngctl, enroll_token + pin for APK builds) on this machine and
 # only their SHA-256 hashes to the server.
 set -euo pipefail
-# NGMGMT_HOST (ssh target), NGMGMT_IP (public IP for the certificate/URL), NGMGMT_SSH_KEY
+# NGMGMT_HOST (ssh target), NGMGMT_IP (public IP for the certificate), NGMGMT_SSH_KEY,
+# NGMGMT_NAME (DNS name for the URL that --init writes; the IP when unset),
+# NGMGMT_DEVICE_URLS (space-separated addresses the apps use, best first; written to the server's
+# device_urls on every deploy, so a new name or IP reaches the phones without a new APK)
 [[ -f "$HOME/.config/ngctl/deploy.env" ]] && source "$HOME/.config/ngctl/deploy.env"
 HOST=${NGMGMT_HOST:?set NGMGMT_HOST, e.g. in ~/.config/ngctl/deploy.env}
 SSH_KEY=${NGMGMT_SSH_KEY:-$HOME/.ssh/id_ed25519}
 PUBLIC_IP=${NGMGMT_IP:?set NGMGMT_IP}
 PORT=${NGMGMT_PORT:-9443}
+URL_HOST=${NGMGMT_NAME:-$PUBLIC_IP}
+DEVICE_URLS=${NGMGMT_DEVICE_URLS:-}
 here=$(cd "$(dirname "$0")" && pwd)
 ssh_() { ssh -i "$SSH_KEY" -o ConnectTimeout=15 "$HOST" "$@"; }
 
@@ -53,10 +58,30 @@ chgrp ngmgmt /etc/ngmgmt/config.json && chmod 640 /etc/ngmgmt/config.json
 EOF
   pin=$(ssh_ cat /etc/ngmgmt/pin)
   umask 077
-  printf '{\n  "url": "https://%s:%s",\n  "token": "%s",\n  "pin": "%s"\n}\n' "$PUBLIC_IP" "$PORT" "$adm" "$pin" > "$conf/config.json"
+  printf '{\n  "url": "https://%s:%s",\n  "token": "%s",\n  "pin": "%s"\n}\n' "$URL_HOST" "$PORT" "$adm" "$pin" > "$conf/config.json"
   printf '%s\n' "$enr" > "$conf/enroll_token"
   printf '%s\n' "$pin" > "$conf/pin"
   echo "wrote $conf/config.json, enroll_token, pin"
+fi
+
+if [[ -n "$DEVICE_URLS" ]]; then
+  # shellcheck disable=SC2086 # word splitting is the point
+  ssh_ python3 - /etc/ngmgmt/config.json $DEVICE_URLS <<'PY'
+import json, os, sys
+path, urls = sys.argv[1], sys.argv[2:]
+with open(path) as f:
+    c = json.load(f)
+if c.get("device_urls") != urls:
+    c["device_urls"] = urls
+    st = os.stat(path)
+    with open(path + ".new", "w") as f:
+        json.dump(c, f, indent=2)
+        f.write("\n")
+    os.chown(path + ".new", st.st_uid, st.st_gid)
+    os.chmod(path + ".new", st.st_mode)
+    os.replace(path + ".new", path)
+    print("device_urls:", " ".join(urls))
+PY
 fi
 
 ssh_ bash -s <<'EOF'

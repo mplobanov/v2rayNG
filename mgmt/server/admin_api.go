@@ -87,6 +87,7 @@ func (s *Server) deviceSummary(d *Device) map[string]any {
 		"model":           strings.TrimSpace(fmt.Sprint(dig(info, "manufacturer"), " ", dig(info, "model"))),
 		"android":         dig(info, "android_release"),
 		"app_version":     dig(info, "app_version"),
+		"mgmt_url":        dig(info, "mgmt_url"),
 		"applied_version": d.AppliedVersion,
 		"note":            d.Note,
 	}
@@ -240,7 +241,7 @@ func (s *Server) adminDeviceConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"version": eff.Version, "applied_version": d.AppliedVersion, "in_sync": eff.Version == d.AppliedVersion,
-		"profiles": eff.Profiles, "doc": eff.Doc, "telemetry": eff.Telemetry, "agent": agentParams(eff.Telemetry, d),
+		"profiles": eff.Profiles, "doc": eff.Doc, "telemetry": eff.Telemetry, "agent": s.agentParams(eff.Telemetry, d),
 		"apply_result": rawOrEmpty(d.ApplyResult),
 	})
 }

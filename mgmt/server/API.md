@@ -84,6 +84,7 @@ reaches any endpoint.
 | `dns_log` | true | core config gets `log.dnsLog`: one line per upstream DNS query (applies at the next core start) |
 | `dns_log_cache` | false | also upload the core's DNS cache-hit lines |
 | `probe_dns` | `ya.ru youtube.com` | hosts the background probe resolves with the phone's own resolver (`dns_system`) |
+| `mgmt_urls` | server `device_urls` | addresses of this server, best first; the app tries them in order, then its baked URL, moving on only when no connection could be made (2.3.13-family.5+, device info `mgmt_caps` contains `urls`) |
 
 Live mode (`POST .../live`) temporarily sets `log_upload_sec=3`, `sync_sec=60`.
 

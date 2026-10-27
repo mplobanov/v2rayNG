@@ -64,9 +64,11 @@ object MgmtTelemetry {
         addProperty("locale", Locale.getDefault().toLanguageTag())
         addProperty("timezone", TimeZone.getDefault().id)
         addProperty("device_name", MgmtSettings.deviceName())
+        MgmtSettings.lastUrl().takeIf { it.isNotBlank() }?.let { addProperty("mgmt_url", it) }
         // "ack": acknowledges started commands and skips repeated ids, so the server may re-send
-        // unacknowledged ones (MgmtCommands.executeOnce).
-        add("mgmt_caps", JsonArray().apply { add("ack") })
+        // unacknowledged ones (MgmtCommands.executeOnce). "urls": follows the server's address
+        // list (agent parameter "mgmt_urls").
+        add("mgmt_caps", JsonArray().apply { add("ack"); add("urls") })
     }
 
     fun profileSummary(guid: String, p: ProfileItem): JsonObject = JsonObject().apply {

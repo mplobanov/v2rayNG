@@ -54,6 +54,11 @@ type Config struct {
 		MeasurementsDays int `json:"measurements_days"`
 	} `json:"retention"`
 	IPInfoURL string `json:"ipinfo_url"`
+	// Addresses devices use to reach this server, best first (e.g. a DNS name, then the bare
+	// IP). Sent to every device as agent parameter "mgmt_urls"; the app falls back along the
+	// list when an address is unreachable, so a new name or IP needs no new APK. A profile's
+	// telemetry section may override it.
+	DeviceURLs []string `json:"device_urls"`
 }
 
 func loadConfig(path string) (*Config, error) {
