@@ -1,6 +1,12 @@
 package com.v2ray.ang.handler.mgmt
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.DnsResolver
+import android.net.Network
+import android.os.Build
+import android.os.CancellationSignal
+import androidx.annotation.RequiresApi
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -21,6 +27,8 @@ import java.net.Proxy
 import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
@@ -190,17 +198,69 @@ object MgmtProbes {
         }
     }
 
-    fun dns(host: String): Measurement {
+    /**
+     * Resolves [host] with the phone's own resolver for its physical network (router or carrier
+     * DNS, or Private DNS): what the apps that bypass the VPN get. From API 29 the query skips
+     * Android's DNS cache, so every probe really asks the resolver.
+     */
+    fun dns(context: Context, host: String, timeoutMs: Int = 5000): Measurement {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.activeNetwork?.let { return resolverQuery(it, host, timeoutMs) }
+        }
         val start = System.nanoTime()
         return try {
             val addrs = InetAddress.getAllByName(host)
             Measurement("dns_system", host, true, elapsed(start), JsonObject().apply {
                 add("addrs", JsonArray().also { a -> addrs.take(8).forEach { a.add(it.hostAddress) } })
+                addProperty("cached", "maybe")
             })
         } catch (e: Exception) {
             Measurement("dns_system", host, false, -1.0, err(e))
         }
     }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun resolverQuery(network: Network, host: String, timeoutMs: Int): Measurement {
+        val start = System.nanoTime()
+        val done = CountDownLatch(1)
+        var answer: ByteArray? = null
+        var rcode = -1
+        var error: Throwable? = null
+        val cancel = CancellationSignal()
+        DnsResolver.getInstance().rawQuery(
+            network, host, DnsResolver.CLASS_IN, DnsResolver.TYPE_A, DnsResolver.FLAG_NO_CACHE_LOOKUP,
+            Executor { it.run() }, cancel,
+            object : DnsResolver.Callback<ByteArray> {
+                override fun onAnswer(a: ByteArray, r: Int) {
+                    answer = a
+                    rcode = r
+                    done.countDown()
+                }
+
+                override fun onError(e: DnsResolver.DnsException) {
+                    error = e
+                    done.countDown()
+                }
+            })
+        if (!done.await(timeoutMs.toLong(), TimeUnit.MILLISECONDS)) {
+            cancel.cancel()
+            return Measurement("dns_system", host, false, elapsed(start), JsonObject().apply {
+                addProperty("error", "timeout")
+            })
+        }
+        val ms = elapsed(start)
+        error?.let { return Measurement("dns_system", host, false, ms, err(it)) }
+        val answers = dnsAnswerCount(answer)
+        return Measurement("dns_system", host, rcode == 0 && answers > 0, ms, JsonObject().apply {
+            addProperty("rcode", rcode)
+            addProperty("answers", answers)
+        })
+    }
+
+    /** ANCOUNT of a raw DNS response (header bytes 6..7). */
+    internal fun dnsAnswerCount(msg: ByteArray?): Int =
+        if (msg == null || msg.size < 12) 0 else ((msg[6].toInt() and 0xff) shl 8) or (msg[7].toInt() and 0xff)
 
     fun realPing(context: Context, guid: String, remarks: String): Measurement {
         val start = System.nanoTime()
@@ -280,7 +340,7 @@ object MgmtProbes {
                 .forEach { out += http(it, true, timeout) }
         }
         args.strings("urls_direct", listOf("https://ya.ru/")).forEach { out += http(it, false, timeout) }
-        args.strings("dns", emptyList()).forEach { out += dns(it) }
+        args.strings("dns", emptyList()).forEach { out += dns(context, it) }
         if (args.has("download_url")) {
             val via = !args.has("download_via") || args.get("download_via").asString != "direct"
             out += http(args.get("download_url").asString, via && coreRunning, timeout * 4, 64L shl 20, kind = "download")
@@ -289,8 +349,15 @@ object MgmtProbes {
     }
 
     /** The periodic background health check of the daemon agent. */
-    fun background(coreDelayFn: (String) -> Long, direct: Boolean, coreDelay: Boolean): List<Measurement> {
+    fun background(
+        context: Context,
+        coreDelayFn: (String) -> Long,
+        direct: Boolean,
+        coreDelay: Boolean,
+        dnsHosts: List<String>,
+    ): List<Measurement> {
         val out = mutableListOf<Measurement>()
+        dnsHosts.forEach { out += dns(context, it) }
         val guid = MmkvManager.getSelectServer() ?: return out
         val p = MmkvManager.decodeServerConfig(guid) ?: return out
         if (coreDelay) out += coreDelay(p.remarks, coreDelayFn)

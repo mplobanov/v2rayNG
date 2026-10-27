@@ -387,6 +387,50 @@ func coreLevel(l logLine) string {
 	return l.Lvl
 }
 
+// dnsLogRe matches the line xray's "log.dnsLog" writes per upstream DNS query:
+// "<server> got answer: <domain> -> [<ips>] <elapsed> <<error>>" (cache hits say "cache HIT:").
+var dnsLogRe = regexp.MustCompile(`^(\S+) got answer: (\S+) -> \[([^\]]*)\](?: (\S+))?(?: <(.*)>)?$`)
+
+// dnsMeasurement turns a core dnsLog line into a measurement of the resolver that answered:
+// kind "dns" (ok = the server answered, "no such record" included), or "dns_canceled" for the
+// loser of a parallel query, which tells how often a resolver was slower than the other.
+func dnsMeasurement(l logLine) (measIn, bool) {
+	if l.Tag != "GoLog" {
+		return measIn{}, false
+	}
+	m := dnsLogRe.FindStringSubmatch(l.Msg)
+	if m == nil {
+		return measIn{}, false
+	}
+	server, domain, ips, elapsed, errText := m[1], m[2], m[3], m[4], m[5]
+	out := measIn{Ts: l.Ts, Kind: "dns", Target: server, Ms: -1}
+	if d, err := time.ParseDuration(elapsed); err == nil {
+		out.Ms = float64(d.Microseconds()) / 1000
+	}
+	n := 0
+	if ips != "" {
+		n = len(strings.Split(ips, ", "))
+	}
+	data := map[string]any{"domain": strings.TrimSuffix(domain, "."), "ips": n}
+	if n > 0 && strings.Trim(strings.NewReplacer("0.0.0.0", "", "::", "", ",", "", " ", "").Replace(ips), "") == "" {
+		data["blocked"] = true // the resolver's filter (AdGuard Home answers 0.0.0.0 / ::)
+	}
+	switch {
+	case errText == "":
+		out.Ok = true
+	case strings.Contains(errText, "context canceled"):
+		out.Kind = "dns_canceled"
+	case strings.Contains(errText, "record not found") || strings.Contains(errText, "empty response") ||
+		strings.Contains(errText, "rcode: 3"):
+		out.Ok = true
+		data["result"] = "no record"
+	default:
+		data["error"] = errText
+	}
+	out.Data, _ = json.Marshal(data)
+	return out, true
+}
+
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 	var req struct {
 		Lines   []logLine `json:"lines"`
@@ -399,6 +443,10 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 	}
 	now := float64(time.Now().UnixNano()) / 1e9
 	maxTs := d.LastLogTs
+	last, _ := parseObject(d.LastState)
+	net, _ := last["net_label"].(string)
+	ip, _ := last["ip"].(string)
+	var dnsMs []measIn
 	err := s.st.Write(func(tx *sql.Tx) error {
 		stmt, err := tx.Prepare(`INSERT INTO logs(device_id, ts, pid, lvl, tag, msg) VALUES(?,?,?,?,?,?)`)
 		if err != nil {
@@ -416,12 +464,18 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 			if ts > maxTs {
 				maxTs = ts
 			}
+			if m, ok := dnsMeasurement(l); ok {
+				dnsMs = append(dnsMs, m)
+			}
 			if l.Tag == "AndroidRuntime" && strings.Contains(l.Msg, "FATAL EXCEPTION") {
 				data, _ := json.Marshal(map[string]any{"msg": l.Msg, "pid": l.Pid})
 				if _, err := tx.Exec(`INSERT INTO events(device_id, ts, type, data) VALUES(?,?,?,?)`, d.ID, ts, "crash", string(data)); err != nil {
 					return err
 				}
 			}
+		}
+		if err := insertMeasurements(tx, d.ID, dnsMs, net, ip, now); err != nil {
+			return err
 		}
 		if req.Dropped > 0 {
 			data, _ := json.Marshal(map[string]any{"dropped": req.Dropped, "source": req.Source})

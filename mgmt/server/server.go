@@ -120,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	a("GET /v1/admin/events", s.adminEvents)
 	a("GET /v1/admin/measurements", s.adminMeasurements)
 	a("GET /v1/admin/stats", s.adminStats)
+	a("GET /v1/admin/dns", s.adminDNS)
 	a("GET /v1/admin/timeline", s.adminTimeline)
 	a("GET /v1/admin/audit", s.adminAudit)
 	a("GET /v1/admin/ipinfo/{ip}", s.adminIPInfo)

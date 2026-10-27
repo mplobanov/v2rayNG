@@ -240,8 +240,13 @@ object MgmtTelemetry {
             out.addProperty("sim_operator", tm.simOperatorName)
             out.addProperty("country", tm.networkCountryIso)
             out.addProperty("roaming", tm.isNetworkRoaming)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) out.addProperty("data_enabled", tm.isDataEnabled)
         } catch (_: Exception) {
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                out.addProperty("data_enabled", tm.isDataEnabled)
+            } catch (_: SecurityException) {
+            }
         }
         try {
             out.addProperty("data_network_type", networkTypeName(tm.dataNetworkType))

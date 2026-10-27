@@ -81,6 +81,9 @@ reaches any endpoint.
 | `log_spec` | `*:W GoLog:V {app}:V` | logcat filter (`{app}` = app log tag) |
 | `log_buffer_lines` | 20000 | lines kept on the device while uploads fail |
 | `poll_wait_sec` | 240 | long-poll hold between syncs (commands arrive immediately) |
+| `dns_log` | true | core config gets `log.dnsLog`: one line per upstream DNS query (applies at the next core start) |
+| `dns_log_cache` | false | also upload the core's DNS cache-hit lines |
+| `probe_dns` | `ya.ru youtube.com` | hosts the background probe resolves with the phone's own resolver (`dns_system`) |
 
 Live mode (`POST .../live`) temporarily sets `log_upload_sec=3`, `sync_sec=60`.
 
@@ -126,7 +129,9 @@ or a list of remarks.
 | `tls_handshake` | `remarks host:port sni` | direct TLS ClientHello→ServerHello with the profile's SNI |
 | `http_proxy` | url | GET through the local SOCKS inbound (data: status, ttfb_ms, bytes) |
 | `http_direct` | url | GET bypassing the VPN |
-| `dns_system` | host | system resolver lookup outside the VPN |
+| `dns_system` | host | the phone's own resolver for its physical network (router/carrier DNS or Private DNS), outside the VPN, cache bypassed on Android 10+ (data: rcode, answers) — what per-app-bypassed apps get |
+| `dns` | resolver (`quic+local://host`, `DOH//host:port`, `UDP:ip:53`) | one upstream query of the core's DNS module, parsed server-side from xray's dnsLog line (data: domain, ips, blocked, result `no record`, error). ok = the resolver answered (NXDOMAIN / no record counts as an answer) |
+| `dns_canceled` | resolver | the same, cancelled because the other resolver of a parallel query answered first |
 | `download` | url | throughput (data: mbps, bytes) |
 
 Each measurement carries `net` = `<transport>/<ISP AS name>` derived from the device state and its
@@ -171,6 +176,7 @@ deprecation notices → I. Access lines (`accepted … [tun >> proxy]`) stay I.
 | `GET /v1/admin/events` | `device, since, until, type, limit` |
 | `GET /v1/admin/measurements` | `device, since, until, kind, target, net, limit` |
 | `GET /v1/admin/stats` | aggregates: `by=kind,target,net` (also `device`, `hour`, `day`), same filters; ok_rate, p50/p90 |
+| `GET /v1/admin/dns` | DNS health: per resolver and network n / ok_rate / p50 / p90 / lost races / blocked, phone-resolver probes, top errors and failing domains (`device, since, until, format=text`) |
 | `GET /v1/admin/timeline` | merged state changes, events, measurements, commands and logs ≥ `log_level` (default W, `none` to skip); `format=text` |
 | `GET /v1/admin/audit` | config change history |
 | `GET /v1/admin/ipinfo/{ip}` | cached ISP lookup |

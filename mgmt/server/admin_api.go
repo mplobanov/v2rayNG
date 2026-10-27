@@ -1076,7 +1076,9 @@ func (s *Server) adminTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	rows, err = s.st.db.Query(`SELECT device_id, ts, kind, target, ok, ms, data FROM measurements WHERE `+where+` ORDER BY ts`, args...)
+	// Per-query DNS rows would bury everything else; the timeline keeps only failed lookups.
+	rows, err = s.st.db.Query(`SELECT device_id, ts, kind, target, ok, ms, data FROM measurements WHERE `+where+
+		` AND kind != 'dns_canceled' AND NOT (kind = 'dns' AND ok = 1) ORDER BY ts`, args...)
 	if err != nil {
 		writeErr(w, err)
 		return

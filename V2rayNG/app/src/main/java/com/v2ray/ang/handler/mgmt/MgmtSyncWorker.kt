@@ -48,7 +48,9 @@ class MgmtSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         if (!agentAlive) {
             val spec = MgmtSettings.agentString("log_spec", "*:W GoLog:V {app}:V")
-            val lines = MgmtLogShipper.dump(spec, MgmtLogShipper.lastUploadedTs(), maxLines = 20_000)
+            val lines = MgmtLogShipper.dump(
+                spec, MgmtLogShipper.lastUploadedTs(), maxLines = 20_000, dnsCacheLines = MgmtSettings.agentBool("dns_log_cache", false)
+            )
             lines.chunked(5000).forEach { if (!MgmtLogShipper.upload(it, 0, "idle")) return@forEach }
         }
         schedule(ctx)

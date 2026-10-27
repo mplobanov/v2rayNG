@@ -87,6 +87,13 @@ ngctl cmd mama exec '{"argv":["ping","-c","5","77.88.8.8"]}' --wait 60
 ngctl profile patch family '{"settings":{"pref_mux_enabled":true}}'   # everyone, at next sync
 ```
 
+DNS: `ngctl dns [mama] --since 24h` shows each core resolver per access network (success rate,
+p50/p90, how often it lost the parallel race, filtered answers), the phone's own resolver (uncached
+probes of `ya.ru`, `youtube.com` every 15 min — what bypassed apps use), the top errors and failing
+domains. The data comes from xray's `dnsLog` (one line per upstream query, every query, at any log
+level), turned into `dns` measurements by the server, so `ngctl stats --kind dns --by target,hour`
+and `ngctl measurements --kind dns` work too; failed lookups also appear in the timeline.
+
 Core (xray) lines carry xray's own level (`[Error]` → E, `[Warning]` → W), so `--level W` and the
 timeline show core errors; the cancelled loser of a parallel DoQ+DoH lookup and the per-core start
 banner are stored as D/I.

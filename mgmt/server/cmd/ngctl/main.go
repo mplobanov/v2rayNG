@@ -166,6 +166,7 @@ logs [<dev>] [--since 1h] [--until T] [--level W] [--tag GoLog,..] [--q text]...
 events [<dev>] [--since 24h] [--type T]
 measurements [<dev>] [--since 24h] [--kind K] [--target T] [--net N]
 stats [--device D] [--since 24h] [--by kind,target,net] [--kind K]
+dns [<dev>] [--since 24h] [--json]       DNS health: resolvers per network, phone resolver, errors
 timeline <dev> [--since 6h] [--until T] [--log-level W|I|none] [--json]
 cmd <dev> <type> [ARGS_JSON] [--wait 120] [--ttl 3600]
 probe <dev> [ARGS_JSON] [--wait 180]      shortcut for cmd <dev> probe
@@ -343,6 +344,20 @@ func main() {
 			f.kv["device"] = []string{f.pos[0]}
 		}
 		printJSON(call(c, "GET", "/v1/admin/stats"+query(f, "device", "since", "until", "kind", "target", "net", "by"), nil, time.Minute))
+	case "dns":
+		if len(f.pos) > 0 {
+			f.kv["device"] = []string{f.pos[0]}
+		}
+		qs := query(f, "device", "since", "until")
+		if f.bool["json"] {
+			printJSON(call(c, "GET", "/v1/admin/dns"+qs, nil, time.Minute))
+			return
+		}
+		sep := "?"
+		if qs != "" {
+			sep = "&"
+		}
+		os.Stdout.Write(call(c, "GET", "/v1/admin/dns"+qs+sep+"format=text", nil, time.Minute))
 	case "timeline":
 		f.kv["device"] = []string{f.arg(0, "device")}
 		qs := query(f, "device", "since", "until", "log_level", "log_limit")

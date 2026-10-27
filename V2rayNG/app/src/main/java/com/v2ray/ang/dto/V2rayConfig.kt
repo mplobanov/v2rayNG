@@ -26,7 +26,7 @@ data class V2rayConfig(
         val access: String? = null,
         val error: String? = null,
         var loglevel: String? = null,
-        val dnsLog: Boolean? = null
+        var dnsLog: Boolean? = null
     )
 
     data class InboundBean(

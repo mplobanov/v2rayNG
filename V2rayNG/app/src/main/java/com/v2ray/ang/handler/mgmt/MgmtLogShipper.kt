@@ -37,6 +37,14 @@ class MgmtLogShipper(private val maxLines: Int) {
             return Line(ts.toDoubleOrNull() ?: return null, pid.toIntOrNull() ?: 0, lvl, tag, msg)
         }
 
+        /**
+         * Drops core DNS cache hits (one per lookup an app makes; they say nothing about the
+         * resolvers) unless the server asks for them.
+         */
+        fun keep(line: Line, dnsCacheLines: Boolean): Boolean =
+            dnsCacheLines || line.tag != "GoLog" ||
+                !(line.msg.contains(" cache HIT: ") || line.msg.contains(" cache OPTIMISTE: "))
+
         /** Expands the server's filter spec ("*:W GoLog:V {app}:V") into logcat arguments. */
         fun specArgs(spec: String): List<String> =
             spec.replace("{app}", AppConfig.TAG).split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -68,7 +76,7 @@ class MgmtLogShipper(private val maxLines: Int) {
         }
 
         /** One-shot read of the log buffer (idle worker, upload_logs command). */
-        fun dump(spec: String, sinceTs: Double?, maxLines: Int = 50_000): List<Line> {
+        fun dump(spec: String, sinceTs: Double?, maxLines: Int = 50_000, dnsCacheLines: Boolean = false): List<Line> {
             val args = mutableListOf("logcat", "-d", "-v", "epoch")
             if (sinceTs != null) {
                 args += listOf("-T", startArg(sinceTs))
@@ -79,7 +87,7 @@ class MgmtLogShipper(private val maxLines: Int) {
                 val out = ArrayDeque<Line>()
                 BufferedReader(InputStreamReader(p.inputStream)).useLines { seq ->
                     seq.forEach { raw ->
-                        parse(raw)?.let {
+                        parse(raw)?.takeIf { keep(it, dnsCacheLines) }?.let {
                             out.addLast(it)
                             if (out.size > maxLines) out.removeFirst()
                         }
@@ -108,7 +116,7 @@ class MgmtLogShipper(private val maxLines: Int) {
     }
 
     /** Blocking: streams logcat until [stop]. Run it on a dedicated IO thread. */
-    fun stream(spec: String) {
+    fun stream(spec: String, dnsCacheLines: Boolean = false) {
         val args = mutableListOf("logcat", "-v", "epoch", "-T", startArg(lastUploadedTs())) + specArgs(spec)
         while (!stopped) {
             try {
@@ -117,7 +125,7 @@ class MgmtLogShipper(private val maxLines: Int) {
                 BufferedReader(InputStreamReader(p.inputStream)).use { r ->
                     while (!stopped) {
                         val raw = r.readLine() ?: break
-                        val line = parse(raw) ?: continue
+                        val line = parse(raw)?.takeIf { keep(it, dnsCacheLines) } ?: continue
                         synchronized(buffer) {
                             buffer.addLast(line)
                             while (buffer.size > maxLines) {

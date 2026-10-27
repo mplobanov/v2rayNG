@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,44 @@ func TestMigrateCoreLevels(t *testing.T) {
 	st.db.QueryRow(`PRAGMA user_version`).Scan(&v)
 	if v != 1 {
 		t.Errorf("user_version %d, want 1", v)
+	}
+}
+
+func TestDNSMeasurement(t *testing.T) {
+	cases := []struct {
+		msg, kind, target string
+		ok                bool
+		ms                float64
+		dataHas           string
+	}{
+		{"DOH//dns.example.net:8443 got answer: www.youtube.com. -> [142.250.74.46, 142.250.74.78] 41.5ms", "dns", "DOH//dns.example.net:8443", true, 41.5, `"ips":2`},
+		{"quic+local://dns.example.net got answer: x.com. -> [] 4.000123s <failed to open quic connection > context deadline exceeded>", "dns", "quic+local://dns.example.net", false, 4000.123, `"error":"failed to open quic connection`},
+		{"DOH//dns.example.net:8443 got answer: graph.facebook.com. -> [] 25ms <context canceled>", "dns_canceled", "DOH//dns.example.net:8443", false, 25, `"domain":"graph.facebook.com"`},
+		{"UDP:77.88.8.8:53 got answer: nosuch.ya.ru. -> [] 12ms <rcode: 3>", "dns", "UDP:77.88.8.8:53", true, 12, `"result":"no record"`},
+		{"UDP:77.88.8.8:53 got answer: ipv6only.ru. -> [] 9µs <record not found>", "dns", "UDP:77.88.8.8:53", true, 0.009, `"result":"no record"`},
+		{"quic+local://dns.example.net got answer: ads.example.com. -> [0.0.0.0, ::] 7.2ms", "dns", "quic+local://dns.example.net", true, 7.2, `"blocked":true`},
+	}
+	for _, c := range cases {
+		m, ok := dnsMeasurement(logLine{Tag: "GoLog", Lvl: "I", Ts: 1, Msg: c.msg})
+		if !ok {
+			t.Fatalf("not parsed: %q", c.msg)
+		}
+		if m.Kind != c.kind || m.Target != c.target || m.Ok != c.ok || m.Ms != c.ms || !strings.Contains(string(m.Data), c.dataHas) {
+			t.Errorf("%q -> %+v data=%s", c.msg, m, m.Data)
+		}
+	}
+	if m, _ := dnsMeasurement(logLine{Tag: "GoLog", Msg: "UDP:1.1.1.1:53 got answer: a.com. -> [10.0.0.1] 1ms"}); strings.Contains(string(m.Data), "blocked") {
+		t.Error("a real answer marked blocked")
+	}
+	for _, msg := range []string{
+		"DOH//dns.example.net:8443 cache HIT: www.youtube.com. -> [142.250.74.46]",
+		"from tcp:10.10.14.1:37484 accepted tcp:1.2.3.4:443 [tun >> proxy]",
+	} {
+		if _, ok := dnsMeasurement(logLine{Tag: "GoLog", Msg: msg}); ok {
+			t.Errorf("parsed a non-query line: %q", msg)
+		}
+	}
+	if _, ok := dnsMeasurement(logLine{Tag: "v2rayNG", Msg: "UDP:1.1.1.1:53 got answer: a. -> [] 1ms"}); ok {
+		t.Error("parsed a non-core line")
 	}
 }

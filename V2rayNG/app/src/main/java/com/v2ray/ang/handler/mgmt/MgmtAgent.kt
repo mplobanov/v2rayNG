@@ -77,7 +77,7 @@ object MgmtAgent {
         s.launch {
             MmkvManager.encodeSettings(MgmtSettings.KEY_CORE_VERSION, CoreNativeManager.getLibVersion())
         }
-        s.launch { sh.stream(MgmtSettings.agentString("log_spec", "*:W GoLog:V {app}:V")) }
+        s.launch { sh.stream(MgmtSettings.agentString("log_spec", "*:W GoLog:V {app}:V"), MgmtSettings.agentBool("dns_log_cache", false)) }
         loops = listOf(
             s.launch { syncLoop(ctx) },
             s.launch { commandLoop(ctx) },
@@ -233,9 +233,11 @@ object MgmtAgent {
         if (MgmtSettings.status() != "approved" || !facts().running) return
         try {
             MgmtProbes.background(
+                context = context ?: return,
                 coreDelayFn = { url -> c.measureDelay(url) },
                 direct = MgmtSettings.agentBool("probe_direct", true),
                 coreDelay = MgmtSettings.agentBool("probe_core_delay", true),
+                dnsHosts = MgmtSettings.agentString("probe_dns", "ya.ru youtube.com").split(' ', ',').filter { it.isNotBlank() },
             ).forEach { measurements.add(it.toJson()) }
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Mgmt: background probe failed", e)
