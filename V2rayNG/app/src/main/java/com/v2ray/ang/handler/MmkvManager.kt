@@ -874,6 +874,21 @@ object MmkvManager {
         return settingsStorage.encode(key, value)
     }
 
+    /** Whether the settings store holds any value for [key]. */
+    fun containsSettingsKey(key: String): Boolean {
+        return settingsStorage.containsKey(key)
+    }
+
+    /** Removes [key] from the settings store so the reader's default applies again. */
+    fun removeSettings(key: String) {
+        settingsStorage.removeValueForKey(key)
+    }
+
+    /** All keys currently present in the settings store. */
+    fun allSettingsKeys(): List<String> {
+        return settingsStorage.allKeys()?.toList().orEmpty()
+    }
+
     /**
      * Decodes the settings string.
      *

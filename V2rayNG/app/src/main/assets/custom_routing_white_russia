@@ -34,6 +34,15 @@
     ]
   },
   {
+    "remarks": "Bypass .ru .su .рф",
+    "outboundTag": "direct",
+    "domain": [
+      "domain:ru",
+      "domain:su",
+      "domain:xn--p1ai"
+    ]
+  },
+  {
     "remarks": "Bypass Russia IP",
     "outboundTag": "direct",
     "ip": [

@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.content.ContextCompat
+import com.google.gson.JsonObject
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.contracts.IDialerService
 import com.v2ray.ang.contracts.ServiceControl
@@ -24,10 +25,15 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SpeedtestManager
+import com.v2ray.ang.handler.mgmt.MgmtAgent
+import com.v2ray.ang.handler.mgmt.MgmtEvents
+import com.v2ray.ang.handler.mgmt.MgmtSyncWorker
+import com.v2ray.ang.handler.mgmt.MgmtTelemetry
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.service.DialerNativeService
 import com.v2ray.ang.service.DialerWebviewService
 import com.v2ray.ang.service.NetworkMonitor
+import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +62,23 @@ object CoreServiceManager {
 
     @Volatile
     private var isReloading = false
+
+    /** When the current core was started; reported to the management server as uptime. */
+    @Volatile
+    private var coreStartedAtMs = 0L
+
+    /** Bytes per "tag/direction" since the core started, for the management server. */
+    private val trafficTotals = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private val mgmtCoreAccess = object : MgmtAgent.CoreAccess {
+        override fun isRunning(): Boolean = this@CoreServiceManager.isRunning()
+        override fun startedAtMs(): Long = coreStartedAtMs
+        override fun traffic(): Map<String, Long> {
+            queryAllOutboundTrafficStats()
+            return HashMap(trafficTotals)
+        }
+        override fun measureDelay(url: String): Long = coreController.measureDelay(url)
+    }
 
     /** Tun descriptor the core was started with, null in the proxy only and root run modes. */
     private var currentVpnInterface: ParcelFileDescriptor? = null
@@ -108,6 +131,11 @@ object CoreServiceManager {
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: $message", e)
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
             NotificationManager.cancelNotification()
+            MgmtEvents.add("vpn_start_failed", JsonObject().apply {
+                addProperty("error", message)
+                add("server", MgmtTelemetry.selectedServer())
+            })
+            MgmtSyncWorker.enqueueNow(service, force = false)
             return false
         }
     }
@@ -123,6 +151,14 @@ object CoreServiceManager {
         currentVpnInterface = vpnInterface
         launchCore(service, vpnInterface)
         startNetworkMonitor(service)
+
+        trafficTotals.clear()
+        coreStartedAtMs = System.currentTimeMillis()
+        MgmtEvents.add("vpn_start", JsonObject().apply {
+            addProperty("mode", if (SettingsManager.isRootMode()) "root" else if (SettingsManager.isVpnMode()) "vpn" else "proxy")
+            add("server", MgmtTelemetry.selectedServer())
+        })
+        MgmtAgent.start(service, mgmtCoreAccess)
     }
 
     @Throws(Exception::class)
@@ -198,6 +234,14 @@ object CoreServiceManager {
         currentVpnInterface = null
 
         if (isRunning()) {
+            MgmtEvents.add("vpn_stop", JsonObject().apply {
+                addProperty("uptime_s", (System.currentTimeMillis() - coreStartedAtMs) / 1000)
+                add("traffic_bytes", JsonUtil.parseString(JsonUtil.toJson(HashMap(trafficTotals))))
+            })
+        }
+        MgmtAgent.stop()
+
+        if (isRunning()) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     coreController.stopLoop()
@@ -268,11 +312,13 @@ object CoreServiceManager {
             launchCore(service, tunFd, isReload = true)
 
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload finished")
+            MgmtEvents.add("core_reload", JsonObject().apply { addProperty("ok", true); addProperty("reason", "network handover") })
             true
         } catch (e: Exception) {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to reload core: $message", e)
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
+            MgmtEvents.add("core_reload", JsonObject().apply { addProperty("ok", false); addProperty("error", message) })
             false
         } finally {
             isReloading = false
@@ -298,6 +344,7 @@ object CoreServiceManager {
             if (parts.size != 3) return@forEach
 
             val value = parts[2].toLongOrNull() ?: return@forEach
+            trafficTotals.merge("${parts[0]}/${parts[1]}", value, Long::plus)
 
             result.add(
                 OutboundTrafficStat(

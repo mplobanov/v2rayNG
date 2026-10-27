@@ -63,7 +63,7 @@ object SettingsManager {
      * @param type The routing preset type.
      * @return A mutable list of RulesetItem.
      */
-    private fun getPresetRoutingRulesets(context: Context, type: RoutingType = RoutingType.WHITE): MutableList<RulesetItem>? {
+    private fun getPresetRoutingRulesets(context: Context, type: RoutingType = RoutingType.WHITE_RUSSIA): MutableList<RulesetItem>? {
         val assets = Utils.readTextFromAssets(context, type.fileName)
         if (TextUtils.isEmpty(assets)) {
             return null
@@ -476,6 +476,31 @@ object SettingsManager {
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_METHOD, AppConfig.OBSERVATORY_LEAST_LOAD_METHOD)
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_SAMPLING, AppConfig.OBSERVATORY_LEAST_LOAD_SAMPLING)
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_TIMEOUT, AppConfig.OBSERVATORY_LEAST_LOAD_TIMEOUT)
+        ensureRussianDefaults()
+    }
+
+    /**
+     * Fresh-install defaults of the family fork, tuned for use from Russia. Each key is written only
+     * when it has never been stored, so a value the user (or the management server) chose is kept.
+     */
+    private fun ensureRussianDefaults() {
+        ensureDefaultValue(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY, AppConfig.DEFAULT_ROUTING_DOMAIN_STRATEGY)
+        // Split DNS: geosite:category-ru and .ru/.su/.рф resolve through Yandex directly (Russian CDN
+        // nodes), everything else through the remote resolver inside the tunnel.
+        ensureDefaultBool(AppConfig.PREF_LOCAL_DNS_ENABLED, true)
+        // xray-core TUN: hev-socks5-tunnel added ~215 ms to every DNS lookup in field tests.
+        ensureDefaultBool(AppConfig.PREF_USE_HEV_TUNNEL, false)
+        if (!MmkvManager.containsSettingsKey(AppConfig.PREF_PER_APP_PROXY_SET)) {
+            MmkvManager.encodeSettings(AppConfig.PREF_PER_APP_PROXY_SET, AppConfig.RU_BYPASS_APPS.toMutableSet())
+            ensureDefaultBool(AppConfig.PREF_PER_APP_PROXY, true)
+            ensureDefaultBool(AppConfig.PREF_BYPASS_APPS, true)
+        }
+    }
+
+    private fun ensureDefaultBool(key: String, default: Boolean) {
+        if (!MmkvManager.containsSettingsKey(key)) {
+            MmkvManager.encodeSettings(key, default)
+        }
     }
 
     private fun ensureDefaultValue(key: String, default: String) {

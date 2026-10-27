@@ -128,7 +128,8 @@ object AppConfig {
     const val GITHUB_DOWNLOAD_URL = "$GITHUB_URL/%s/releases/latest/download"
     const val ANDROID_PACKAGE_NAME_LIST_URL = "$GITHUB_RAW_URL/2dust/androidpackagenamelist/master/proxy.txt"
     const val APP_URL = "$GITHUB_URL/2dust/v2rayNG"
-    const val APP_API_URL = "https://api.github.com/repos/2dust/v2rayNG/releases"
+    // Family fork: update checks look at the fork's releases, not upstream's (different applicationId).
+    const val APP_API_URL = "https://api.github.com/repos/mplobanov/v2rayNG/releases"
     const val APP_ISSUES_URL = "$APP_URL/issues"
     const val APP_WIKI_MODE = "$APP_URL/wiki/Mode"
     const val APP_PRIVACY_POLICY = "$GITHUB_RAW_URL/2dust/v2rayNG/master/CR.md"
@@ -147,7 +148,8 @@ object AppConfig {
 
     /** DNS server addresses. */
     const val DNS_PROXY = "https://cloudflare-dns.com/dns-query"
-    const val DNS_DIRECT = "223.5.5.5"
+    // Yandex DNS: answers from Russia with Russian CDN nodes; used for domestic (direct) domains.
+    const val DNS_DIRECT = "77.88.8.8"
     const val DNS_VPN = "1.1.1.1"
     const val GEOSITE_PRIVATE = "geosite:private"
     const val GEOSITE_CN = "geosite:cn"
@@ -176,6 +178,30 @@ object AppConfig {
     const val DEFAULT_HEV_TUNNEL_LOGLEVEL = "warn"
     const val DEFAULT_MUX_XUDP_CONCURRENCY = "8"
 
+    /** Russian defaults (family fork), written once on a fresh install. */
+    const val DEFAULT_ROUTING_DOMAIN_STRATEGY = "IPIfNonMatch"
+
+    /**
+     * Apps excluded from the tunnel by default: Russian banking, government, marketplace, taxi and
+     * carrier apps that detect an active VPN and refuse to work or degrade under it. They reach
+     * Russian services anyway, so the tunnel gives them nothing. Unknown packages are skipped.
+     */
+    val RU_BYPASS_APPS = setOf(
+        "ru.sberbankmobile", "ru.sberbank.sberbankid", "ru.nspk.mirpay",
+        "com.idamob.tinkoff.android", "ru.vtb24.mobilebanking.android", "ru.alfabank.mobile.android",
+        "ru.gazprombank.android.mobilebank.app", "ru.raiffeisennews", "ru.psbank.online",
+        "ru.rosbank.android", "ru.mkb.mobile", "ru.sovcomcard.halva.v1", "ru.otpbank.mobile",
+        "ru.rostel", "ru.gosuslugi.goskey", "ru.mos.app", "ru.fns.lkfl", "ru.nalog.www",
+        "ru.ozon.app.android", "com.wildberries.ru", "com.avito.android", "ru.vk.store",
+        "ru.oneme.app", "com.vkontakte.android", "ru.ok.android", "com.vk.vkvideo",
+        "ru.yandex.taxi", "ru.yandex.searchplugin", "com.yandex.browser", "ru.yandex.yandexmaps",
+        "ru.yandex.yandexnavi", "ru.yandex.disk", "ru.yandex.mail", "ru.yandex.music",
+        "ru.kinopoisk", "ru.yandex.market", "com.yandex.bank", "ru.yandex.eda",
+        "ru.mts.mymts", "ru.megafon.mlk", "ru.beeline.services", "ru.tele2.mytele2",
+        "ru.dublgis.dgismobile", "ru.hh.android", "ru.rzd.pass", "ru.sbermarket.android",
+        "ru.vkusvill", "ru.samokat.mobile", "ru.lenta.lentochka", "ru.x5.app",
+    )
+
     /** Message constants for communication. */
     const val MSG_REGISTER_CLIENT = 1
     const val MSG_STATE_RUNNING = 11
@@ -197,6 +223,9 @@ object AppConfig {
     const val MSG_MEASURE_CONFIG_FINISH = 74
 
     const val MSG_SUB_UPDATE_START = 8
+
+    /** The management server's configuration was applied in another process; reload the UI. */
+    const val MSG_MGMT_CONFIG_APPLIED = 91
     const val MSG_SUB_UPDATE_CANCEL = 81
 
     /** Notification channel IDs and names. */
@@ -341,8 +370,8 @@ object AppConfig {
     )
 
     val GEO_FILES_SOURCES = arrayListOf(
-        "Loyalsoldier/v2ray-rules-dat",
         "runetfreedom/russia-v2ray-rules-dat",
+        "Loyalsoldier/v2ray-rules-dat",
         "Chocolate4U/Iran-v2ray-rules"
     )
 

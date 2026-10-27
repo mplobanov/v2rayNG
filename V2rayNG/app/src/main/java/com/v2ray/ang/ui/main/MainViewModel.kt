@@ -182,6 +182,11 @@ class MainViewModel(
                     resetTestStatus()
                 }
             }
+
+            MainServiceEvent.RemoteConfigApplied -> {
+                refreshUiSettings()
+                setupGroupTab(forceRefresh = true)
+            }
         }
     }
 

@@ -1,0 +1,39 @@
+{
+  "_note": "Example shared profile for family devices. Per-device subscriptions go into device overrides (they are credentials). The live profile is kept outside git. Replace dns.example.net with your own resolver or drop pref_remote_dns to keep the app default.",
+  "settings": {
+    "pref_mode": "VPN",
+    "pref_core_loglevel": "warning",
+    "pref_remote_dns": "quic+local://dns.example.net,https://dns.example.net/dns-query",
+    "pref_domestic_dns": "77.88.8.8",
+    "pref_vpn_dns": "1.1.1.1",
+    "pref_local_dns_enabled": true,
+    "pref_fake_dns_enabled": false,
+    "pref_sniffing_enabled": true,
+    "pref_route_only_enabled": false,
+    "pref_routing_domain_strategy": "IPIfNonMatch",
+    "pref_use_hev_tunnel_v2": false,
+    "pref_fragment_enabled": false,
+    "pref_mux_enabled": false,
+    "pref_ipv6_enabled": false,
+    "pref_speed_enabled": true,
+    "pref_is_booted": true,
+    "pref_geo_files_sources": "runetfreedom/russia-v2ray-rules-dat"
+  },
+  "routing": {
+    "rulesets": [
+      {"remarks": "Bypass bittorrent", "outboundTag": "direct", "protocol": ["bittorrent"]},
+      {"remarks": "Block udp443", "outboundTag": "block", "port": "443", "network": "udp"},
+      {"remarks": "Direct LAN IP", "outboundTag": "direct", "ip": ["geoip:private"]},
+      {"remarks": "Direct LAN domains", "outboundTag": "direct", "domain": ["geosite:private"]},
+      {"remarks": "Bypass Russia domains", "outboundTag": "direct", "domain": ["geosite:category-ru"]},
+      {"remarks": "Bypass .ru .su .рф", "outboundTag": "direct", "domain": ["domain:ru", "domain:su", "domain:xn--p1ai"]},
+      {"remarks": "Bypass Russia IP", "outboundTag": "direct", "ip": ["geoip:ru"]}
+    ]
+  },
+  "restart": "auto",
+  "telemetry": {
+    "sync_sec": 300,
+    "probe_sec": 900,
+    "log_upload_sec": 60
+  }
+}

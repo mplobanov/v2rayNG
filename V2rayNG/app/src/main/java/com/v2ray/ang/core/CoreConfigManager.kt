@@ -1172,7 +1172,7 @@ object CoreConfigManager {
 
         v2rayConfig.routing.domainStrategy =
             MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY)
-                ?: "AsIs"
+                ?: AppConfig.DEFAULT_ROUTING_DOMAIN_STRATEGY
 
         val rulesetItems = MmkvManager.decodeRoutingRulesets()
         rulesetItems?.forEach { key ->

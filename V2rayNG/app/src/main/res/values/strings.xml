@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">v2rayNG</string>
+    <string name="app_name" translatable="false">v2rayNG Family</string>
     <string name="app_widget_name">Switch</string>
     <string name="app_tile_name">Switch</string>
     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>
@@ -565,4 +565,30 @@
     <string name="sub_info_traffic" translatable="false">%1$s / %2$s</string>
     <string name="sub_info_unlimited">Unlimited</string>
 
+
+    <!-- Family fork: remote management -->
+    <string name="title_mgmt">Remote management</string>
+    <string name="mgmt_enabled">Managed by the family server</string>
+    <string name="mgmt_enabled_summary">Settings come from the administrator; logs and connection diagnostics are sent to the server</string>
+    <string name="mgmt_status">Status</string>
+    <string name="mgmt_status_value">%1$s · last sync %2$s</string>
+    <string name="mgmt_status_off">Off</string>
+    <string name="mgmt_status_approved">Connected</string>
+    <string name="mgmt_status_pending">Waiting for the administrator to approve this device</string>
+    <string name="mgmt_status_disabled">Disabled by the administrator</string>
+    <string name="mgmt_status_unenrolled">Not registered yet</string>
+    <string name="mgmt_never">never</string>
+    <string name="mgmt_last_error">Last error: %1$s</string>
+    <string name="mgmt_sync_now">Sync now</string>
+    <string name="mgmt_sync_started">Sync requested</string>
+    <string name="mgmt_grant_permissions">Allow network diagnostics</string>
+    <string name="mgmt_grant_permissions_summary">Lets reports include the Wi-Fi name and mobile network type (location and phone permissions)</string>
+    <string name="mgmt_section_device">This device</string>
+    <string name="mgmt_section_server">Server</string>
+    <string name="mgmt_device_name">Device name</string>
+    <string name="mgmt_device_id">Device ID</string>
+    <string name="mgmt_url">Server address</string>
+    <string name="mgmt_pin">Certificate pin</string>
+    <string name="mgmt_enroll_token">Enrollment token</string>
+    <string name="mgmt_reenroll">Register again</string>
 </resources>

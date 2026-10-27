@@ -22,6 +22,7 @@ import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
+import com.v2ray.ang.handler.mgmt.MgmtSyncWorker
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
@@ -57,6 +58,7 @@ class MainRepository(
                 )
 
                 AppConfig.MSG_STATE_STOP_SUCCESS -> MainServiceEvent.StateStopSuccess
+                AppConfig.MSG_MGMT_CONFIG_APPLIED -> MainServiceEvent.RemoteConfigApplied
                 AppConfig.MSG_MEASURE_DELAY_RESULT -> safeIntent
                     .serializable<ConnectionTestResult>("content")
                     ?.let { MainServiceEvent.MeasureDelayResult(it, requestId) }
@@ -227,6 +229,9 @@ class MainRepository(
 
     override fun syncSubscriptions() {
         SubscriptionUpdater.sync(app)
+        // Remote management: keep the idle sync scheduled and check in whenever the app opens.
+        MgmtSyncWorker.schedule(app)
+        MgmtSyncWorker.enqueueNow(app, force = false)
     }
 
     override fun initAssets() {

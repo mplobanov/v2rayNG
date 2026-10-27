@@ -78,11 +78,11 @@ private enum class RoutingMenuAction(@StringRes val labelRes: Int) {
 }
 
 private enum class RoutingPreset(val type: RoutingType, @StringRes val labelRes: Int) {
+    RussiaWhitelist(RoutingType.WHITE_RUSSIA, R.string.routing_preset_russia_whitelist),
+    Global(RoutingType.GLOBAL, R.string.routing_preset_global),
     ChinaWhitelist(RoutingType.WHITE, R.string.routing_preset_china_whitelist),
     ChinaBlacklist(RoutingType.BLACK, R.string.routing_preset_china_blacklist),
-    Global(RoutingType.GLOBAL, R.string.routing_preset_global),
-    IranWhitelist(RoutingType.WHITE_IRAN, R.string.routing_preset_iran_whitelist),
-    RussiaWhitelist(RoutingType.WHITE_RUSSIA, R.string.routing_preset_russia_whitelist)
+    IranWhitelist(RoutingType.WHITE_IRAN, R.string.routing_preset_iran_whitelist)
 }
 
 class RoutingSettingActivity : HelperBaseComponentActivity() {
@@ -121,8 +121,7 @@ class RoutingSettingActivity : HelperBaseComponentActivity() {
     }
 
     private fun getDomainStrategy(): String {
-        val strategies = resources.getStringArray(R.array.routing_domain_strategy)
-        return MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY) ?: strategies.first()
+        return MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY) ?: AppConfig.DEFAULT_ROUTING_DOMAIN_STRATEGY
     }
 
     private fun importPredefined(type: RoutingType) {

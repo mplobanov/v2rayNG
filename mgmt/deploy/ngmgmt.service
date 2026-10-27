@@ -1,0 +1,28 @@
+[Unit]
+Description=ngmgmt - v2rayNG Family logs & configs server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ngmgmt
+Group=ngmgmt
+ExecStart=/opt/ngmgmt/ngmgmt serve -config /etc/ngmgmt/config.json
+Restart=always
+RestartSec=3
+# 1-vCPU box shared with xray, AdGuard Home and headscale: xray comes first.
+MemoryMax=250M
+CPUWeight=20
+Nice=5
+StateDirectory=ngmgmt
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ngmgmt
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

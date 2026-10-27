@@ -1,3 +1,14 @@
+import java.util.Properties
+
+// Family fork: the management server (mgmt/server) is baked in from an untracked file so that
+// tokens never enter git. Keys: url, pin, enroll_token. See mgmt/README.md.
+val mgmtProps = Properties().apply {
+    val f = rootProject.file("mgmt.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun mgmtProp(key: String): String =
+    (findProperty("mgmt.$key") as? String ?: mgmtProps.getProperty(key) ?: "").replace("\"", "")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,11 +21,14 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.v2ray.ang"
+        applicationId = "com.v2ray.ang.family"
         minSdk = 24
         targetSdk = 37
         versionCode = 753
-        versionName = "2.3.13"
+        versionName = "2.3.13-family.1"
+        buildConfigField("String", "MGMT_URL", "\"${mgmtProp("url")}\"")
+        buildConfigField("String", "MGMT_PIN", "\"${mgmtProp("pin")}\"")
+        buildConfigField("String", "MGMT_ENROLL_TOKEN", "\"${mgmtProp("enroll_token")}\"")
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {

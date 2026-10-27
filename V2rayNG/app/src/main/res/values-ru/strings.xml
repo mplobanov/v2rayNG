@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">v2rayNG</string>
+    <string name="app_name" translatable="false">v2rayNG Family</string>
     <string name="app_widget_name">v2rayNG</string>
     <string name="app_tile_name">v2rayNG</string>
     <string name="app_tile_first_use">Добавьте профиль в приложении перед использованием этой функции.</string>
@@ -568,4 +568,30 @@
     <string name="sub_info_open_page">Открыть страницу подписки</string>
     <string name="sub_info_unlimited">Без ограничений</string>
 
+
+    <!-- Family fork: remote management -->
+    <string name="title_mgmt">Удалённое управление</string>
+    <string name="mgmt_enabled">Управляется семейным сервером</string>
+    <string name="mgmt_enabled_summary">Настройки задаёт администратор; журналы и диагностика соединения отправляются на сервер</string>
+    <string name="mgmt_status">Состояние</string>
+    <string name="mgmt_status_value">%1$s · синхронизация %2$s</string>
+    <string name="mgmt_status_off">Выключено</string>
+    <string name="mgmt_status_approved">Подключено</string>
+    <string name="mgmt_status_pending">Ждёт подтверждения администратором</string>
+    <string name="mgmt_status_disabled">Отключено администратором</string>
+    <string name="mgmt_status_unenrolled">Ещё не зарегистрировано</string>
+    <string name="mgmt_never">никогда</string>
+    <string name="mgmt_last_error">Последняя ошибка: %1$s</string>
+    <string name="mgmt_sync_now">Синхронизировать сейчас</string>
+    <string name="mgmt_sync_started">Синхронизация запущена</string>
+    <string name="mgmt_grant_permissions">Разрешить диагностику сети</string>
+    <string name="mgmt_grant_permissions_summary">Чтобы в отчётах было имя Wi-Fi и тип мобильной сети (разрешения на геолокацию и телефон)</string>
+    <string name="mgmt_section_device">Это устройство</string>
+    <string name="mgmt_section_server">Сервер</string>
+    <string name="mgmt_device_name">Имя устройства</string>
+    <string name="mgmt_device_id">ID устройства</string>
+    <string name="mgmt_url">Адрес сервера</string>
+    <string name="mgmt_pin">Отпечаток сертификата</string>
+    <string name="mgmt_enroll_token">Токен регистрации</string>
+    <string name="mgmt_reenroll">Зарегистрировать заново</string>
 </resources>
