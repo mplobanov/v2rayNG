@@ -191,9 +191,44 @@ func storeResults(tx *sql.Tx, devID string, rs []resultIn, net, ip string, now f
 	return nil
 }
 
-// takeCommands marks queued commands as sent and returns them.
-func takeCommands(tx *sql.Tx, devID string, now int64) ([]cmdOut, error) {
-	rows, err := tx.Query(`SELECT id, type, args, expires FROM commands WHERE device_id=? AND status='queued' AND expires>? ORDER BY id`, devID, now)
+// Delivery is at-least-once for devices that acknowledge commands (deviceAcks): a command handed
+// to such an app (awaits_ack) but neither acknowledged (POST /v1/ack, sent when the phone starts
+// it) nor answered within redeliverAfter seconds goes out again with the next sync or poll, at
+// most maxDeliveries times in all. The response carrying it may never have reached the phone (a
+// long poll cut by a VPN restart or a network switch), or the phone dropped it unstarted when its
+// agent stopped. The phone skips ids it already started, so a repeat is not executed twice. A
+// command handed to an older app stays delivered once, also after that app is upgraded.
+var redeliverAfter int64 = 90
+
+const maxDeliveries = 5
+
+// deviceAcks tells whether the device's app acknowledges commands and ignores repeats
+// (device info "mgmt_caps" contains "ack"); older apps get every command exactly once.
+func deviceAcks(info string) bool {
+	var v struct {
+		Caps []string `json:"mgmt_caps"`
+	}
+	if json.Unmarshal([]byte(info), &v) != nil {
+		return false
+	}
+	for _, c := range v.Caps {
+		if c == "ack" {
+			return true
+		}
+	}
+	return false
+}
+
+// takeCommands marks queued commands (and, with redeliver, unacknowledged ones due for
+// redelivery) as sent and returns them.
+func takeCommands(tx *sql.Tx, devID string, now int64, redeliver bool) ([]cmdOut, error) {
+	q := `SELECT id, type, args, expires FROM commands WHERE device_id=? AND expires>? AND (status='queued'`
+	qargs := []any{devID, now}
+	if redeliver {
+		q += ` OR (status='sent' AND awaits_ack=1 AND sent_at<=? AND deliveries<?)`
+		qargs = append(qargs, now-redeliverAfter, maxDeliveries)
+	}
+	rows, err := tx.Query(q+`) ORDER BY id`, qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,11 +245,34 @@ func takeCommands(tx *sql.Tx, devID string, now int64) ([]cmdOut, error) {
 	}
 	rows.Close()
 	for _, c := range out {
-		if _, err := tx.Exec(`UPDATE commands SET status='sent', sent_at=? WHERE id=?`, now, c.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE commands SET status='sent', sent_at=?, deliveries=deliveries+1, awaits_ack=? WHERE id=?`,
+			now, redeliver, c.ID); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// nextRedelivery returns when the device's earliest unacknowledged command becomes due for
+// redelivery (unix seconds), or 0 if there is none.
+func nextRedelivery(tx *sql.Tx, devID string, now int64) (int64, error) {
+	var sent sql.NullInt64
+	err := tx.QueryRow(`SELECT MIN(sent_at) FROM commands WHERE device_id=? AND status='sent' AND awaits_ack=1 AND deliveries<? AND expires>?`,
+		devID, maxDeliveries, now).Scan(&sent)
+	if err != nil || !sent.Valid {
+		return 0, err
+	}
+	return sent.Int64 + redeliverAfter, nil
+}
+
+// ackCommands records that the device started the given commands: they are not redelivered.
+func ackCommands(tx *sql.Tx, devID string, ids []int64) error {
+	for _, id := range ids {
+		if _, err := tx.Exec(`UPDATE commands SET status='running' WHERE id=? AND device_id=? AND status='sent'`, id, devID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, d *Device) {
@@ -319,7 +377,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, d *Device) {
 		if applied != eff.Version {
 			resp["config"] = map[string]any{"version": eff.Version, "doc": eff.Doc}
 		}
-		cmds, err := takeCommands(tx, d.ID, nowT.Unix())
+		cmds, err := takeCommands(tx, d.ID, nowT.Unix(), deviceAcks(info))
 		if err != nil {
 			return err
 		}
@@ -347,6 +405,22 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request, d *Device
 	now := float64(time.Now().UnixNano()) / 1e9
 	err := s.st.Write(func(tx *sql.Tx) error { return storeResults(tx, d.ID, req.Results, net, ip, now) })
 	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// handleAck takes the ids of commands the device has started (see takeCommands).
+func (s *Server) handleAck(w http.ResponseWriter, r *http.Request, d *Device) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := readJSON(r, 64<<10, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.st.Write(func(tx *sql.Tx) error { return ackCommands(tx, d.ID, req.IDs) }); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -499,8 +573,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, d *Device) {
 	writeJSON(w, 200, map[string]any{"ok": true, "accepted": len(req.Lines)})
 }
 
-// handlePoll is the live-mode long poll: it returns as soon as a command is queued or the
-// device's configuration changes, or after ?wait seconds.
+// handlePoll is the live-mode long poll: it returns as soon as a command is queued (or due for
+// redelivery) or the device's configuration changes, or after ?wait seconds.
 func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 	wait := intParam(r, "wait", 50, 290)
 	applied := r.URL.Query().Get("v")
@@ -508,6 +582,7 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 	for {
 		ch := s.notify.wait(d.ID)
 		var resp map[string]any
+		var redeliverAt int64
 		err := s.st.Write(func(tx *sql.Tx) error {
 			cur, err := scanDevice(tx.QueryRow(`SELECT `+deviceCols+` FROM devices WHERE id=?`, d.ID))
 			if err != nil {
@@ -521,7 +596,9 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 			if err != nil {
 				return err
 			}
-			cmds, err := takeCommands(tx, d.ID, time.Now().Unix())
+			now := time.Now().Unix()
+			acks := deviceAcks(cur.Info)
+			cmds, err := takeCommands(tx, d.ID, now, acks)
 			if err != nil {
 				return err
 			}
@@ -529,8 +606,12 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 			if len(cmds) > 0 || changed {
 				resp = map[string]any{"status": cur.Status, "commands": cmds, "config_changed": changed,
 					"agent": agentParams(eff.Telemetry, cur)}
+				return nil
 			}
-			return nil
+			if acks {
+				redeliverAt, err = nextRedelivery(tx, d.ID, now)
+			}
+			return err
 		})
 		if err != nil {
 			writeErr(w, err)
@@ -540,8 +621,13 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request, d *Device) {
 			writeJSON(w, 200, resp)
 			return
 		}
+		var redeliver <-chan time.Time
+		if redeliverAt > 0 {
+			redeliver = time.After(time.Until(time.Unix(redeliverAt, 0)))
+		}
 		select {
 		case <-ch:
+		case <-redeliver:
 		case <-deadline:
 			writeJSON(w, 200, map[string]any{"status": "approved", "commands": []cmdOut{}, "config_changed": false})
 			return

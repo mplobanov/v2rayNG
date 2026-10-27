@@ -64,6 +64,9 @@ object MgmtTelemetry {
         addProperty("locale", Locale.getDefault().toLanguageTag())
         addProperty("timezone", TimeZone.getDefault().id)
         addProperty("device_name", MgmtSettings.deviceName())
+        // "ack": acknowledges started commands and skips repeated ids, so the server may re-send
+        // unacknowledged ones (MgmtCommands.executeOnce).
+        add("mgmt_caps", JsonArray().apply { add("ack") })
     }
 
     fun profileSummary(guid: String, p: ProfileItem): JsonObject = JsonObject().apply {

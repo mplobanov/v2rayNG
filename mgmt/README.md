@@ -98,6 +98,14 @@ Core (xray) lines carry xray's own level (`[Error]` → E, `[Warning]` → W), s
 timeline show core errors; the cancelled loser of a parallel DoQ+DoH lookup and the per-core start
 banner are stored as D/I.
 
+Commands go `queued` → `sent` → `running` (the phone started it) → `done`/`failed`. Apps from
+2.3.13-family.4 on acknowledge each command when they start it, and the server re-sends one still
+`sent` after 90 s (up to 5 deliveries), so a command caught in a VPN restart arrives late instead
+of never; the phone skips ids it already started. `ngctl cmd`'s output shows `deliveries`. A resent
+command can run late (up to its TTL; default 1 h). A probe's
+`real_ping` that hangs (a stalled REALITY handshake) is cut off at 2 × `timeout_ms` (≥ 15 s) and
+recorded as `error: "timeout"`.
+
 `tcp_connect` / `tls_handshake` failing while `http_direct` to ya.ru works means the path to that
 server port is blocked (DPI); `core_delay` failing while the direct probes pass points at the server
 or the exit behind it. Measurements carry `net` like `cellular/MTS-AS` or `wifi/MGTS-PPPOE`.

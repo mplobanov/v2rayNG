@@ -31,6 +31,55 @@ object MgmtCommands {
 
     private val execAllowed = setOf("ping", "ping6", "getprop", "ip", "cat", "ls")
 
+    /** Started command ids are remembered this long, longer than the server re-sends a command. */
+    private const val STARTED_KEEP_SEC = 7 * 86400L
+    private const val MAX_STARTED = 200
+
+    /**
+     * The server re-sends a command until this install acknowledges starting it (API.md
+     * "Delivery"), so the same id can arrive more than once. Runs [cmd] only the first time,
+     * after recording it as started and acknowledging it through [ack]; a repeat is acknowledged
+     * again (the earlier ack may have been lost) and skipped. Returns null for a repeat.
+     */
+    fun executeOnce(env: Env, cmd: JsonObject, ack: (Long) -> Unit): JsonObject? {
+        val id = cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asLong ?: return null
+        val first = claim(id)
+        ack(id)
+        if (!first) {
+            LogUtil.i(AppConfig.TAG, "Mgmt: command #$id received again, already started; skipped")
+            return null
+        }
+        return execute(env, cmd)
+    }
+
+    /**
+     * Records [id] as started; false if it already was. The record is shared by the daemon agent
+     * and the idle worker; they get the same id at least redelivery-interval apart.
+     */
+    @Synchronized
+    private fun claim(id: Long): Boolean {
+        val raw = MmkvManager.decodeSettingsString(MgmtSettings.KEY_STARTED_COMMANDS)
+        val updated = startedWith(raw, id, System.currentTimeMillis() / 1000) ?: return false
+        MmkvManager.encodeSettings(MgmtSettings.KEY_STARTED_COMMANDS, updated)
+        return true
+    }
+
+    /**
+     * The started-commands record ("id:unixSec,…", oldest first) with [id] added, or null if [id]
+     * is in it. Entries older than [STARTED_KEEP_SEC] are dropped and at most [MAX_STARTED] kept.
+     */
+    internal fun startedWith(raw: String?, id: Long, nowSec: Long): String? {
+        val entries = raw.orEmpty().split(',').mapNotNull { e ->
+            val i = e.substringBefore(':').toLongOrNull()
+            val t = e.substringAfter(':', "").toLongOrNull()
+            if (i == null || t == null) null else i to t
+        }
+        if (entries.any { it.first == id }) return null
+        return (entries.filter { nowSec - it.second < STARTED_KEEP_SEC } + (id to nowSec))
+            .takeLast(MAX_STARTED)
+            .joinToString(",") { "${it.first}:${it.second}" }
+    }
+
     fun execute(env: Env, cmd: JsonObject): JsonObject {
         val id = cmd.get("id").asLong
         val type = cmd.get("type")?.asString.orEmpty()

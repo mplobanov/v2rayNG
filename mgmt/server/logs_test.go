@@ -66,8 +66,8 @@ func TestMigrateCoreLevels(t *testing.T) {
 	}
 	var v int
 	st.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 2 {
-		t.Errorf("user_version %d, want 2", v)
+	if v != 4 {
+		t.Errorf("user_version %d, want 4", v)
 	}
 }
 

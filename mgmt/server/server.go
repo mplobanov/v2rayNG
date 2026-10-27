@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /v1/logs", s.device(s.handleLogs))
 	m.HandleFunc("GET /v1/poll", s.device(s.handlePoll))
 	m.HandleFunc("POST /v1/results", s.device(s.handleResults))
+	m.HandleFunc("POST /v1/ack", s.device(s.handleAck))
 
 	// admin API
 	a := func(p string, h http.HandlerFunc) { m.HandleFunc(p, s.admin(h)) }

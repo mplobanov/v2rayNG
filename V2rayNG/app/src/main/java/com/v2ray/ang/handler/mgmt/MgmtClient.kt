@@ -9,6 +9,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.Call
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -168,6 +169,16 @@ object MgmtClient {
             ?.mapNotNull { if (it.isJsonObject) it.asJsonObject else null }.orEmpty()
     }
 
+    /** Tells the server these commands were started, so it stops re-sending them. */
+    fun ack(ids: List<Long>): Boolean {
+        if (ids.isEmpty()) return true
+        val token = MgmtSettings.deviceToken() ?: return false
+        val body = JsonObject().apply { add("ids", JsonArray().also { a -> ids.forEach { a.add(it) } }) }
+        val res = MgmtHttp.post("/v1/ack", body, token)
+        if (!res.ok) LogUtil.w(AppConfig.TAG, "Mgmt: ack of commands $ids failed: ${res.error}")
+        return res.ok
+    }
+
     fun postResults(results: List<JsonObject>): Boolean {
         if (results.isEmpty()) return true
         val token = MgmtSettings.deviceToken() ?: return false
@@ -175,10 +186,13 @@ object MgmtClient {
         return MgmtHttp.post("/v1/results", body, token, compress = true).ok
     }
 
-    /** Long poll: returns commands as soon as the server has some, or null on timeout/failure. */
-    fun poll(waitSec: Int): MgmtHttp.HttpResult? {
+    /**
+     * Long poll: returns commands as soon as the server has some, or null on timeout/failure.
+     * [onCall] receives the HTTP call before it starts, so the caller can cancel it.
+     */
+    fun poll(waitSec: Int, onCall: ((Call) -> Unit)? = null): MgmtHttp.HttpResult? {
         val token = MgmtSettings.deviceToken() ?: return null
         val v = java.net.URLEncoder.encode(MgmtSettings.appliedVersion(), "UTF-8")
-        return MgmtHttp.get("/v1/poll?wait=$waitSec&v=$v", token, readTimeoutSec = waitSec + 30L)
+        return MgmtHttp.get("/v1/poll?wait=$waitSec&v=$v", token, readTimeoutSec = waitSec + 30L, onCall = onCall)
     }
 }

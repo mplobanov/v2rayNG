@@ -93,6 +93,20 @@ Live mode (`POST .../live`) temporarily sets `log_upload_sec=3`, `sync_sec=60`.
 (add `?wait=120` to block until the result). A running VPN agent long-polls, so commands reach it
 within seconds; with the VPN off they wait for the next idle sync (≤ `idle_sync_min`).
 
+Status: `queued` → `sent` (handed to the device; `deliveries` counts how often) → `running` (the
+device acknowledged starting it) → `done` / `failed`, or `expired` when the TTL passes first.
+
+Delivery is at least once for apps from 2.3.13-family.4 on (device info `"mgmt_caps": ["ack"]`):
+the app acknowledges each command when it starts it (`POST /v1/ack`), and a command still `sent`
+90 s after its last delivery goes out again with the next sync or poll, at most 5 deliveries in
+all. That covers a response that never reached the phone (a long poll cut by a VPN restart or a
+network switch) and a command the phone dropped unstarted when its agent stopped (e.g. queued
+behind a `select_server`). The app remembers the ids it started for a week and skips a repeat, so
+nothing runs twice. A command queued on the phone behind a long probe can get repeats; they are
+skipped. Older apps get each command exactly once, and a command handed to an older app is not
+resent after that app is upgraded. A resent command can run late (up to its TTL, e.g. a phone that
+was offline): give a `select_server` a short `ttl_sec` if running it late would be wrong.
+
 | type | args | does |
 |---|---|---|
 | `sync` | – | sync now |
@@ -119,12 +133,18 @@ within seconds; with the VPN off they wait for the next idle sync (≤ `idle_syn
 `servers`: `"selected"`, `"group"` (all servers in the selected server's subscription), `"all"`,
 or a list of remarks.
 
+`real_ping` and `core_delay` (libv2ray delay tests) get a hard wall-clock limit of
+2 × `timeout_ms`, at least 15 s; the background probe's `core_delay` gets 15 s. A test past it is
+recorded with `ok=false`, `data.error="timeout"` and the probe goes on. libv2ray cannot cancel the
+call, so its thread is left running until the native call returns; while 4 such calls are stuck,
+further delay tests are skipped (`data.error="skipped: 4 earlier delay tests still stuck"`).
+
 ## Measurement kinds
 
 | kind | target | meaning |
 |---|---|---|
 | `core_delay` | server remarks | HTTP delay test through the running core (what the app's "test" shows) |
-| `real_ping` | server remarks | delay test through a temporary core for that server (VPN may be off) |
+| `real_ping` | server remarks | delay test through a temporary core for that server (VPN may be off); `error: "timeout"` past the hard limit (see `probe` above) |
 | `tcp_connect` | `remarks host:port` | direct TCP connect to the server, bypassing the VPN (DPI / port blocks) |
 | `tls_handshake` | `remarks host:port sni` | direct TLS ClientHello→ServerHello with the profile's SNI |
 | `http_proxy` | url | GET through the local SOCKS inbound (data: status, ttfb_ms, bytes) |
@@ -192,3 +212,4 @@ Event types: `enrolled`, `config_applied`, `vpn_start`, `vpn_stop`, `vpn_start_f
 - `POST /v1/logs {"lines":[{"ts","pid","lvl","tag","msg"}],"dropped":0,"source":"stream"}` (gzip ok)
 - `GET /v1/poll?wait=240&v=<applied_version>` → returns early with commands / `config_changed`
 - `POST /v1/results {"results":[{"id","ok","result","error","measurements"}]}`
+- `POST /v1/ack {"ids":[13,15]}`: the device started these commands (`sent` → `running`); see "Commands"

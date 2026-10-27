@@ -415,9 +415,9 @@ func (s *Server) adminCommandCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) loadCommand(id int64) (map[string]any, string, error) {
 	var devID, typ, args, status, result, errS string
-	var created, expires, sent, done int64
-	err := s.st.db.QueryRow(`SELECT device_id, created, expires, type, args, status, sent_at, done_at, result, error FROM commands WHERE id=?`, id).
-		Scan(&devID, &created, &expires, &typ, &args, &status, &sent, &done, &result, &errS)
+	var created, expires, sent, deliveries, done int64
+	err := s.st.db.QueryRow(`SELECT device_id, created, expires, type, args, status, sent_at, deliveries, done_at, result, error FROM commands WHERE id=?`, id).
+		Scan(&devID, &created, &expires, &typ, &args, &status, &sent, &deliveries, &done, &result, &errS)
 	if err == sql.ErrNoRows {
 		return nil, "", errf(404, "no command %d", id)
 	}
@@ -428,6 +428,7 @@ func (s *Server) loadCommand(id int64) (map[string]any, string, error) {
 		"created": s.iso(float64(created)), "expires": s.iso(float64(expires))}
 	if sent > 0 {
 		out["sent_at"] = s.iso(float64(sent))
+		out["deliveries"] = deliveries
 	}
 	if done > 0 {
 		out["done_at"] = s.iso(float64(done))

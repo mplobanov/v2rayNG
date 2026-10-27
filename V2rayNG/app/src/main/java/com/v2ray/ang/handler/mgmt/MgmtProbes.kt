@@ -17,6 +17,7 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.util.LogUtil
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.OkHttpClient
@@ -27,9 +28,14 @@ import java.net.Proxy
 import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -262,25 +268,87 @@ object MgmtProbes {
     internal fun dnsAnswerCount(msg: ByteArray?): Int =
         if (msg == null || msg.size < 12) 0 else ((msg[6].toInt() and 0xff) shl 8) or (msg[7].toInt() and 0xff)
 
-    fun realPing(context: Context, guid: String, remarks: String): Measurement {
+    /** A delay test that did not return by its deadline ("timeout") or was not started ("skipped: …"). */
+    class DeadlineException(message: String) : Exception(message)
+
+    /**
+     * libv2ray's delay tests cannot be interrupted, and a real_ping was seen to never return when
+     * a server's REALITY handshake stalled (MTS DPI dropping the ClientHello, 2026-10-27): its own
+     * 12 s HTTP timeout fires, but closing the temporary core then waits on the stuck dial. So each
+     * test runs on a daemon thread of its own and the caller stops waiting at the deadline; an
+     * abandoned thread ends whenever the native call does. While [MAX_STUCK] are still blocked,
+     * new tests are skipped instead of piling up more temporary cores.
+     */
+    private val delayTests = Executors.newCachedThreadPool { r -> Thread(r, "mgmt-delay-test").apply { isDaemon = true } }
+    private val stuck = AtomicInteger()
+    private const val MAX_STUCK = 4
+    private const val RUNNING = 0
+    private const val FINISHED = 1
+    private const val ABANDONED = 2
+
+    /** Delay tests abandoned at their deadline that have not returned yet. */
+    internal fun stuckDelayTests(): Int = stuck.get()
+
+    internal fun <T> withDeadline(timeoutMs: Long, block: () -> T): T {
+        val n = stuck.get()
+        if (n >= MAX_STUCK) throw DeadlineException("skipped: $n earlier delay tests still stuck")
+        val state = AtomicInteger(RUNNING)
+        val future = delayTests.submit(Callable {
+            try {
+                block()
+            } finally {
+                if (!state.compareAndSet(RUNNING, FINISHED)) stuck.decrementAndGet()
+            }
+        })
+        try {
+            return try {
+                future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                if (state.compareAndSet(RUNNING, ABANDONED)) {
+                    stuck.incrementAndGet()
+                    throw DeadlineException("timeout")
+                }
+                future.get() // it returned just now
+            }
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
+    }
+
+    private fun deadlineMissed(kind: String, remarks: String, e: DeadlineException, start: Long, timeoutMs: Long) =
+        Measurement(kind, remarks, false, -1.0, JsonObject().apply {
+            addProperty("error", e.message)
+            addProperty("after_ms", elapsed(start))
+            addProperty("deadline_ms", timeoutMs)
+        })
+
+    /** [timeoutMs] is a hard wall-clock limit for the whole test; see [withDeadline]. */
+    fun realPing(context: Context, guid: String, remarks: String, timeoutMs: Long): Measurement {
         val start = System.nanoTime()
         return try {
             CoreNativeManager.initCoreEnv(context)
             val cfg = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
             if (!cfg.status) return Measurement("real_ping", remarks, false, -1.0, JsonObject().apply { addProperty("error", cfg.errorMessage) })
-            val ms = CoreNativeManager.measureOutboundDelay(cfg.content, SettingsManager.getDelayTestUrl())
+            val url = SettingsManager.getDelayTestUrl()
+            val ms = withDeadline(timeoutMs) { CoreNativeManager.measureOutboundDelay(cfg.content, url) }
             Measurement("real_ping", remarks, ms >= 0, ms.toDouble(), JsonObject().apply { addProperty("wall_ms", elapsed(start)) })
+        } catch (e: DeadlineException) {
+            LogUtil.w(AppConfig.TAG, "Mgmt: real_ping $guid: ${e.message} after $timeoutMs ms")
+            deadlineMissed("real_ping", remarks, e, start, timeoutMs)
         } catch (e: Exception) {
             Measurement("real_ping", remarks, false, -1.0, err(e))
         }
     }
 
-    fun coreDelay(remarks: String, measure: (String) -> Long): Measurement {
+    fun coreDelay(remarks: String, timeoutMs: Long, measure: (String) -> Long): Measurement {
         val url = SettingsManager.getDelayTestUrl()
         val start = System.nanoTime()
         return try {
-            val ms = measure(url)
+            val ms = withDeadline(timeoutMs) { measure(url) }
             Measurement("core_delay", remarks, ms >= 0, ms.toDouble(), JsonObject().apply { addProperty("url", url) })
+        } catch (e: DeadlineException) {
+            LogUtil.w(AppConfig.TAG, "Mgmt: core_delay: ${e.message} after $timeoutMs ms")
+            deadlineMissed("core_delay", remarks, e, start, timeoutMs)
         } catch (e: Exception) {
             Measurement("core_delay", remarks, false, -1.0, err(e).apply { addProperty("after_ms", elapsed(start)) })
         }
@@ -322,17 +390,26 @@ object MgmtProbes {
         return out
     }
 
+    /**
+     * Hard limit of one delay test: twice the probe's timeout_ms, but at least
+     * [MIN_DELAY_DEADLINE_MS] because libv2ray's own HTTP timeout is 12 s plus the core start.
+     */
+    internal fun delayDeadlineMs(timeoutMs: Int): Long = maxOf(2L * timeoutMs, MIN_DELAY_DEADLINE_MS)
+
+    private const val MIN_DELAY_DEADLINE_MS = 15_000L
+
     /** The on-demand "probe" command. */
     fun run(context: Context, args: JsonObject, coreRunning: Boolean, coreDelayFn: ((String) -> Long)?): List<Measurement> {
         val timeout = if (args.has("timeout_ms")) args.get("timeout_ms").asInt else 8000
+        val deadline = delayDeadlineMs(timeout)
         val out = mutableListOf<Measurement>()
         val servers = serversFor(args.get("servers"))
         val selected = MmkvManager.getSelectServer()
         servers.forEach { (guid, p) ->
             out += directServerProbes(p, timeout, args.flag("tcp", true), args.flag("tls", true))
-            if (args.flag("real_ping", true)) out += realPing(context, guid, p.remarks)
+            if (args.flag("real_ping", true)) out += realPing(context, guid, p.remarks, deadline)
             if (guid == selected && coreRunning && coreDelayFn != null && args.flag("core_delay", true)) {
-                out += coreDelay(p.remarks, coreDelayFn)
+                out += coreDelay(p.remarks, deadline, coreDelayFn)
             }
         }
         if (coreRunning) {
@@ -360,7 +437,7 @@ object MgmtProbes {
         dnsHosts.forEach { out += dns(context, it) }
         val guid = MmkvManager.getSelectServer() ?: return out
         val p = MmkvManager.decodeServerConfig(guid) ?: return out
-        if (coreDelay) out += coreDelay(p.remarks, coreDelayFn)
+        if (coreDelay) out += coreDelay(p.remarks, MIN_DELAY_DEADLINE_MS, coreDelayFn)
         if (direct) {
             out += directServerProbes(p, 6000, tcp = true, tls = true)
             out += http("https://ya.ru/", false, 6000, maxBytes = 64 * 1024)

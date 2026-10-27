@@ -36,6 +36,7 @@ object MgmtSettings {
     const val KEY_CORE_VERSION = "mgmt_core_version"
     const val KEY_CORE_STARTED = "mgmt_core_started"
     const val KEY_WIFI_NAME = "mgmt_wifi_name"
+    const val KEY_STARTED_COMMANDS = "mgmt_started_commands"
 
     fun isEnabled(): Boolean =
         MmkvManager.decodeSettingsBool(KEY_ENABLED, BuildConfig.MGMT_URL.isNotBlank()) && url().isNotBlank()

@@ -3,6 +3,7 @@ package com.v2ray.ang.handler.mgmt
 import android.util.Base64
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -97,15 +98,18 @@ object MgmtHttp {
         return execute(rb, token, readTimeoutSec)
     }
 
-    fun get(pathAndQuery: String, token: String?, readTimeoutSec: Long = 60): HttpResult {
-        return execute(Request.Builder().url(MgmtSettings.url() + pathAndQuery).get(), token, readTimeoutSec)
+    /** [onCall] receives the call before it starts; cancelling it ends the request with an error. */
+    fun get(pathAndQuery: String, token: String?, readTimeoutSec: Long = 60, onCall: ((Call) -> Unit)? = null): HttpResult {
+        return execute(Request.Builder().url(MgmtSettings.url() + pathAndQuery).get(), token, readTimeoutSec, onCall)
     }
 
-    private fun execute(rb: Request.Builder, token: String?, readTimeoutSec: Long): HttpResult {
+    private fun execute(rb: Request.Builder, token: String?, readTimeoutSec: Long, onCall: ((Call) -> Unit)? = null): HttpResult {
         if (!token.isNullOrBlank()) rb.header("Authorization", "Bearer $token")
         rb.header("User-Agent", "v2rayNG-family-mgmt")
         return try {
-            client(readTimeoutSec).newCall(rb.build()).execute().use { resp ->
+            val call = client(readTimeoutSec).newCall(rb.build())
+            onCall?.invoke(call)
+            call.execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
                 val json = try {
                     if (text.isBlank()) null else JsonParser.parseString(text).asJsonObject

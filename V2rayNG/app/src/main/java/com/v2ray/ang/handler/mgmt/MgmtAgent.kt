@@ -19,7 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Call
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Remote-management agent of the VPN daemon process. It lives exactly as long as the core runs:
@@ -48,6 +50,9 @@ object MgmtAgent {
     private val results = ConcurrentLinkedQueue<JsonObject>()
     private var wake = Channel<Boolean>(Channel.CONFLATED)
     private var commandQueue = Channel<JsonObject>(Channel.UNLIMITED)
+
+    /** The open long poll, cancelled by [stop]. */
+    private val pollCall = AtomicReference<Call?>()
 
     private fun facts(): MgmtTelemetry.CoreFacts {
         val c = core
@@ -101,6 +106,10 @@ object MgmtAgent {
         // agent alive again, which would keep the idle worker away for the whole alive window.
         loops.forEach { it.cancel() }
         loops = emptyList()
+        // Cancelling the loop does not end its blocking long poll, which would stay open for up
+        // to poll_wait_sec and take commands that nothing runs any more (the server re-sends
+        // them only after a delay, see MgmtCommands.executeOnce).
+        pollCall.getAndSet(null)?.cancel()
         MgmtSettings.markAgentAlive(false)
         core = null
         s.launch {
@@ -181,7 +190,13 @@ object MgmtAgent {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) return false
             val wait = minOf(MgmtSettings.agentInt("poll_wait_sec", 240).toLong(), remaining / 1000).coerceAtLeast(5)
-            val r = MgmtClient.poll(wait.toInt())
+            var call: Call? = null
+            val r = MgmtClient.poll(wait.toInt()) { c ->
+                call = c
+                pollCall.set(c)
+                if (!isActive) c.cancel()
+            }
+            pollCall.compareAndSet(call, null)
             if (!isActive) break
             MgmtSettings.markAgentAlive(true)
             if (r == null || !r.ok || r.body == null) {
@@ -202,7 +217,10 @@ object MgmtAgent {
 
     private suspend fun commandLoop(ctx: Context) {
         for (cmd in commandQueue) {
-            val result = MgmtCommands.execute(env(ctx), cmd)
+            // The ack goes out in the agent scope, which outlives this loop by the final upload,
+            // so a select_server that restarts the VPN is still acknowledged.
+            val result = MgmtCommands.executeOnce(env(ctx), cmd) { id -> scope?.launch { MgmtClient.ack(listOf(id)) } }
+                ?: continue
             if (!MgmtClient.postResults(listOf(result))) results.add(result)
         }
     }

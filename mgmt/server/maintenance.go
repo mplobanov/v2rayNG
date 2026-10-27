@@ -18,7 +18,7 @@ func (s *Server) maintenanceLoop(ctx context.Context) {
 		case <-tick.C:
 		}
 		now := time.Now().Unix()
-		if _, err := s.st.Exec(`UPDATE commands SET status='expired' WHERE status IN ('queued','sent') AND expires<?`, now); err != nil {
+		if _, err := s.st.Exec(`UPDATE commands SET status='expired' WHERE status IN ('queued','sent','running') AND expires<?`, now); err != nil {
 			log.Printf("expire commands: %v", err)
 		}
 		if time.Since(lastRetention) < time.Hour {

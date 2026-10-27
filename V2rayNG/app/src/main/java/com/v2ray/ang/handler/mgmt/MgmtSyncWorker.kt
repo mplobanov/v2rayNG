@@ -40,7 +40,7 @@ class MgmtSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
         var fullRequested = false
         val env = MgmtCommands.Env(ctx, coreRunning = false, coreDelay = null, requestSync = { fullRequested = fullRequested || it })
-        val results = outcome.commands.map { MgmtCommands.execute(env, it) }
+        val results = outcome.commands.mapNotNull { cmd -> MgmtCommands.executeOnce(env, cmd) { id -> MgmtClient.ack(listOf(id)) } }
         if (results.isNotEmpty() && !MgmtClient.postResults(results)) {
             outcome = MgmtClient.sync(ctx, core, results = results)
         }

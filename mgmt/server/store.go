@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS commands (
   args TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'queued',
   sent_at INTEGER NOT NULL DEFAULT 0,
+  deliveries INTEGER NOT NULL DEFAULT 0,
+  awaits_ack INTEGER NOT NULL DEFAULT 0,
   done_at INTEGER NOT NULL DEFAULT 0,
   result TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT ''
@@ -185,6 +187,48 @@ func (s *Store) migrate() error {
 				return err
 			}
 			_, err = tx.Exec(`PRAGMA user_version=2`)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if v < 3 {
+		// 3: commands.deliveries (at-least-once delivery); a fresh database has it from the schema.
+		err := s.Write(func(tx *sql.Tx) error {
+			var n int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='deliveries'`).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				if _, err := tx.Exec(`ALTER TABLE commands ADD COLUMN deliveries INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(`UPDATE commands SET deliveries=1 WHERE sent_at>0`); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(`PRAGMA user_version=3`)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if v < 4 {
+		// 4: commands.awaits_ack: only a command handed to an acknowledging app is redelivered.
+		// Without it, commands an older app had dropped were re-run when it was upgraded.
+		err := s.Write(func(tx *sql.Tx) error {
+			var n int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='awaits_ack'`).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				if _, err := tx.Exec(`ALTER TABLE commands ADD COLUMN awaits_ack INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(`PRAGMA user_version=4`)
 			return err
 		})
 		if err != nil {
